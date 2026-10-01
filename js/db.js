@@ -5,11 +5,13 @@
 //   people       {conn, id, ...person}        key [conn, id]
 //   visits       {conn, id, ...visit}         key [conn, id]
 //   pictures     {conn, id, personId, dataUrl} key [conn, id]
+//   time, studies, reports  {conn, id, ...}  key [conn, id] (version 2)
 //   outbox       {seq, conn, kind, ...}       changes waiting to be sent
 
 const DB_NAME = 'rv-notes';
-const DB_VERSION = 1;
-const CONNECTION_STORES = ['people', 'visits', 'pictures', 'outbox'];
+const DB_VERSION = 2;
+const RECORD_STORES = ['people', 'visits', 'pictures', 'time', 'studies', 'reports'];
+const CONNECTION_STORES = [...RECORD_STORES, 'outbox'];
 
 let dbPromise = null;
 
@@ -24,13 +26,15 @@ function open() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
+      // Adds whatever stores are missing, so older versions upgrade in place.
       request.onupgradeneeded = () => {
         const db = request.result;
-        db.createObjectStore('connections', { keyPath: 'id' });
-        for (const name of ['people', 'visits', 'pictures']) {
+        const has = name => db.objectStoreNames.contains(name);
+        if (!has('connections')) db.createObjectStore('connections', { keyPath: 'id' });
+        for (const name of RECORD_STORES.filter(name => !has(name))) {
           db.createObjectStore(name, { keyPath: ['conn', 'id'] }).createIndex('conn', 'conn');
         }
-        db.createObjectStore('outbox', { keyPath: 'seq', autoIncrement: true }).createIndex('conn', 'conn');
+        if (!has('outbox')) db.createObjectStore('outbox', { keyPath: 'seq', autoIncrement: true }).createIndex('conn', 'conn');
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);

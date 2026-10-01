@@ -3,9 +3,13 @@ import * as L from '../vendor/leaflet/leaflet-src.esm.js';
 import { callApi } from './api.js';
 import { createStore } from './store.js';
 import {
+  addMonths, dayKey, formatMinutes, monthKey, monthLabel, reportId, reportMonths, reportText, summarize, uniqueStudies
+} from './report.js';
+import { startScanner } from './scanner.js';
+import {
   DAYS, PERIODS, MAX_PICTURE_BYTES, markdown, storage, decodeBase64Url, toLocalInput, fromLocalInput,
   formatDateTime, shortDate, relative, endOfToday, returnBadgeClass, firstLine, parseCoords, formatCoords,
-  mapQuery, mapsUrl, directionsUrl, shrinkImage
+  mapQuery, mapsUrl, directionsUrl, shrinkImage, uuid, nowIso
 } from './util.js';
 
 const isLocalDev = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -712,7 +716,8 @@ const app = createApp({
         createdAt: toLocalInput(new Date().toISOString()),
         notes: '',
         returnAt: toLocalInput(futureReturn),
-        updateReturnAt: true
+        updateReturnAt: true,
+        countStudy: person.isStudy
       }, draft || {});
       hasVisitDraft.value = !!draft;
       show('visit');
@@ -725,11 +730,15 @@ const app = createApp({
         createdAt: toLocalInput(visit.createdAt),
         notes: visit.notes,
         returnAt: '',
-        updateReturnAt: false
+        updateReturnAt: false,
+        countStudy: false
       });
       hasVisitDraft.value = false;
       show('visit');
     }
+
+    const visitMonth = computed(() => monthKey(visitForm.createdAt ? new Date(visitForm.createdAt) : new Date()));
+    const visitStudyCounted = computed(() => isStudyCounted(visitForm.personId, visitMonth.value));
 
     watch(visitForm, () => {
       if (view.value !== 'visit' || visitForm.id) return;
@@ -771,6 +780,9 @@ const app = createApp({
           notes: visitForm.notes
         }, visitForm.updateReturnAt ? { returnAt: fromLocalInput(visitForm.returnAt) } : {});
         if (isNew) storage.remove(draftKey(visitForm.personId));
+        if (isNew && visitForm.countStudy && !visitStudyCounted.value) {
+          await addStudyFor(current.value, visitMonth.value);
+        }
         show('person');
         showToast(isNew ? 'Visit saved.' : 'Saved.');
       } catch (err) {
@@ -789,6 +801,289 @@ const app = createApp({
       }
     }
 
+    /* -- Monthly report -------------------------------------------------- */
+
+    const reportMonth = ref(monthKey());
+    const reportData = computed(() => ({
+      time: store.state.time, studies: store.state.studies, reports: store.state.reports, visits: store.state.visits
+    }));
+    const summary = computed(() => summarize(reportData.value, reportMonth.value));
+    const reportName = computed(() => store.state.active && store.state.active.reportName || '');
+    const currentReportText = computed(() => reportText(summary.value, { name: reportName.value }));
+    const changedSinceSent = computed(() => summary.value.sent && summary.value.report.text !== currentReportText.value);
+    const reportHistory = computed(() => reportMonths(reportData.value).map(month => {
+      const s = summarize(reportData.value, month);
+      return { month, label: monthLabel(month), hours: s.service.liveHours, studies: s.studies.length, sent: s.sent };
+    }));
+    const reportComments = ref('');
+    watch(() => [reportMonth.value, summary.value.comments], () => reportComments.value = summary.value.comments, { immediate: true });
+
+    function openReport(month = monthKey()) {
+      reportMonth.value = month;
+      show('report');
+    }
+
+    function stepMonth(count) {
+      reportMonth.value = addMonths(reportMonth.value, count);
+    }
+
+    // Saves fields of the month's report, creating it if needed. Each month
+    // has one report with a fixed ID, so two phones can't make two.
+    function saveReport(fields) {
+      const existing = summary.value.report || {
+        id: reportId(reportMonth.value), month: reportMonth.value, shared: '', comments: '', sentAt: '', hours: '',
+        creditHours: '', studies: '', carriedMinutes: '', carriedCreditMinutes: '', text: ''
+      };
+      return store.saveRecord('reports', { ...existing, ...fields }).catch(showError);
+    }
+
+    function setShared(value) {
+      saveReport({ shared: value });
+    }
+
+    function saveComments() {
+      if (reportComments.value.trim() !== summary.value.comments.trim()) saveReport({ comments: reportComments.value.trim() });
+    }
+
+    async function saveReportName(event) {
+      const name = event.target.value.trim();
+      if (name !== reportName.value) await store.updateConnection(store.state.active.id, { reportName: name });
+    }
+
+    function markSent() {
+      const s = summary.value;
+      return saveReport({
+        sentAt: nowIso(),
+        hours: s.service.liveHours,
+        creditHours: s.credit.liveHours,
+        studies: s.studies.length,
+        carriedMinutes: s.service.liveCarriedOut,
+        carriedCreditMinutes: s.credit.liveCarriedOut,
+        text: currentReportText.value
+      });
+    }
+
+    async function sendReport() {
+      saveComments();
+      await nextTick();
+      const text = currentReportText.value;
+      if (navigator.share) {
+        try {
+          await navigator.share({ text });
+        } catch (err) {
+          // Closing the share sheet isn't an error.
+          if (err.name !== 'AbortError') showError(err);
+          return;
+        }
+        await markSent();
+        showToast(`${monthLabel(reportMonth.value)} report sent.`);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (err) {
+        showToast('Couldn’t copy the report. Select the text and copy it instead.', true);
+        return;
+      }
+      if (confirm('The report was copied. Paste it into a message or email.\n\nMark it as sent?')) await markSent();
+    }
+
+    /* Bible studies */
+
+    function studyKey(study) {
+      return study.personId || `name:${study.name.trim().toLowerCase()}`;
+    }
+
+    function isStudyCounted(personId, month) {
+      return uniqueStudies(store.state.studies, month).some(study => study.personId === personId);
+    }
+
+    function addStudyFor(person, month) {
+      return store.saveRecord('studies', { id: uuid(), month, personId: person.id, name: person.name });
+    }
+
+    const studyName = ref('');
+    const studyPersonId = ref('');
+    // People who aren't counted yet this month. Those marked Studying come
+    // first as one-tap suggestions.
+    const studyCandidates = computed(() => {
+      const counted = new Set(summary.value.studies.map(study => study.personId).filter(Boolean));
+      return people.value.filter(person => !counted.has(person.id)).sort((a, b) => a.name.localeCompare(b.name));
+    });
+    const studySuggestions = computed(() => studyCandidates.value.filter(person => person.isStudy));
+
+    function studyDisplayName(study) {
+      const person = study.personId && people.value.find(p => p.id === study.personId);
+      return person ? person.name : study.name;
+    }
+
+    async function addStudyPerson(person) {
+      await addStudyFor(person, reportMonth.value).catch(showError);
+      studyPersonId.value = '';
+    }
+
+    async function addStudyName() {
+      const name = studyName.value.trim();
+      if (!name) return;
+      if (summary.value.studies.some(study => studyKey(study) === `name:${name.toLowerCase()}`)) {
+        showToast(`${name} is already counted.`, true);
+        return;
+      }
+      await store.saveRecord('studies', { id: uuid(), month: reportMonth.value, personId: '', name }).catch(showError);
+      studyName.value = '';
+    }
+
+    // Removes every copy (two phones may have added the same study).
+    async function removeStudy(study, month = reportMonth.value) {
+      const key = studyKey(study);
+      for (const s of store.state.studies.filter(s => s.month === month && studyKey(s) === key)) {
+        await store.deleteRecord('studies', s.id).catch(showError);
+      }
+    }
+
+    // The toggle on a person's page counts them for the current month.
+    const personStudyMonth = computed(() => monthKey(now.value));
+    const personStudyCounted = computed(() => current.value && isStudyCounted(current.value.id, personStudyMonth.value));
+    function togglePersonStudy() {
+      const person = current.value;
+      if (personStudyCounted.value) {
+        removeStudy({ personId: person.id, name: person.name }, personStudyMonth.value);
+      } else {
+        addStudyFor(person, personStudyMonth.value).catch(showError);
+      }
+    }
+
+    /* Time entries and the timer */
+
+    const timerKey = () => `rv-notes/timer/${store.state.active ? store.state.active.id : ''}`;
+    const timer = ref(null);
+    const clock = ref(Date.now());
+    let clockInterval = null;
+    watch(() => store.state.active && store.state.active.id, () => timer.value = storage.get(timerKey()), { immediate: true });
+    watch(timer, value => {
+      clearInterval(clockInterval);
+      if (value) clockInterval = setInterval(() => clock.value = Date.now(), 1000);
+    }, { immediate: true });
+
+    const timerElapsed = computed(() => {
+      if (!timer.value) return '';
+      const seconds = Math.max(0, Math.floor((clock.value - new Date(timer.value.startedAt)) / 1000));
+      const pad = n => String(n).padStart(2, '0');
+      return `${Math.floor(seconds / 3600)}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`;
+    });
+
+    function startTimer() {
+      timer.value = { startedAt: nowIso() };
+      clock.value = Date.now();
+      storage.set(timerKey(), timer.value);
+    }
+
+    const timeForm = reactive({});
+    let timeSnapshot = '';
+
+    function fillTimeForm(fields) {
+      Object.assign(timeForm, { id: '', date: dayKey(), hours: 0, minutes: 0, kind: 'service', note: '', fromTimer: false }, fields);
+      timeSnapshot = JSON.stringify(timeForm);
+      show('timeEntry');
+    }
+
+    function stopTimer() {
+      const start = new Date(timer.value.startedAt);
+      const minutes = Math.max(1, Math.round((Date.now() - start) / 60000));
+      fillTimeForm({ date: dayKey(start), hours: Math.floor(minutes / 60), minutes: minutes % 60, fromTimer: true });
+    }
+
+    function newTimeEntry() {
+      const month = reportMonth.value;
+      fillTimeForm({ date: month === monthKey() ? dayKey() : `${month}-01` });
+    }
+
+    function editTimeEntry(entry) {
+      fillTimeForm({
+        id: entry.id, date: entry.date, hours: Math.floor(entry.minutes / 60), minutes: entry.minutes % 60,
+        kind: entry.kind, note: entry.note
+      });
+    }
+
+    function setDuration(minutes) {
+      timeForm.hours = Math.floor(minutes / 60);
+      timeForm.minutes = minutes % 60;
+    }
+
+    async function saveTimeForm() {
+      const minutes = (Number(timeForm.hours) || 0) * 60 + (Number(timeForm.minutes) || 0);
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) {
+        showToast('Enter between 1 minute and 24 hours, in whole minutes.', true);
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(timeForm.date)) {
+        showToast('Choose a date.', true);
+        return;
+      }
+      try {
+        await store.saveRecord('time', {
+          id: timeForm.id || uuid(), date: timeForm.date, minutes, kind: timeForm.kind, note: timeForm.note.trim()
+        });
+        if (timeForm.fromTimer) {
+          timer.value = null;
+          storage.remove(timerKey());
+        }
+        reportMonth.value = timeForm.date.slice(0, 7);
+        show('report');
+        showToast(`Saved ${formatMinutes(minutes)}.`);
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    async function removeTimeEntry() {
+      if (!confirm('Delete this time entry?')) return;
+      await store.deleteRecord('time', timeForm.id).catch(showError);
+      show('report');
+      showToast('Deleted.');
+    }
+
+    /* -- QR code scanner ----------------------------------------------------- */
+
+    const scanner = reactive({ open: false, message: '' });
+    const scannerVideo = ref(null);
+    let stopScanning = null;
+
+    async function openScanner() {
+      scanner.open = true;
+      scanner.message = 'Starting the camera…';
+      await nextTick();
+      try {
+        const stop = await startScanner(scannerVideo.value, text => {
+          const link = parseConnectLink(text);
+          if (!link) {
+            scanner.message = 'That isn’t an RV Notes code. In the spreadsheet, choose RV Notes → Connect app.';
+            return false;
+          }
+          closeScanner();
+          connectForm.link = text;
+          connectForm.name = '';
+          show('addConnection');
+          return true;
+        });
+        if (!scanner.open) {
+          stop();
+          return;
+        }
+        stopScanning = stop;
+        scanner.message = 'Point the camera at the QR code from RV Notes → Connect app.';
+      } catch (err) {
+        closeScanner();
+        showError(err);
+      }
+    }
+
+    function closeScanner() {
+      scanner.open = false;
+      if (stopScanning) stopScanning();
+      stopScanning = null;
+    }
+
     /* -- Navigation ------------------------------------------------------ */
 
     const title = computed(() => {
@@ -798,6 +1093,8 @@ const app = createApp({
       if (view.value === 'visit') return visitForm.id ? 'Edit Visit' : 'New Visit';
       if (view.value === 'connections') return 'Spreadsheets';
       if (view.value === 'addConnection') return connectExisting.value ? 'Reconnect a Spreadsheet' : 'Add a Spreadsheet';
+      if (view.value === 'report') return 'Monthly Report';
+      if (view.value === 'timeEntry') return timeForm.id ? 'Edit Time' : 'Add Time';
       return 'RV Notes';
     });
 
@@ -805,6 +1102,7 @@ const app = createApp({
       if (busy.value) return busy.value;
       if (view.value === 'visit' && current.value) return current.value.name;
       if (view.value === 'list') return syncSummary.value;
+      if (view.value === 'report') return store.state.active ? store.state.active.name : '';
       return '';
     });
 
@@ -823,6 +1121,15 @@ const app = createApp({
         show('person');
       } else if (view.value === 'addConnection') {
         show(store.state.connections.length ? 'connections' : 'welcome');
+      } else if (view.value === 'timeEntry') {
+        if (timeForm.fromTimer) {
+          if (!confirm('Discard this time? The timer will be cleared.')) return;
+          timer.value = null;
+          storage.remove(timerKey());
+        } else if (JSON.stringify(timeForm) !== timeSnapshot && !confirm('Discard your changes?')) {
+          return;
+        }
+        show('report');
       } else {
         show('list');
       }
@@ -872,7 +1179,14 @@ const app = createApp({
       placeQuery, findingPlaces, places, placeIndex, findPlaces, previewPlace, confirmPlace, clearPlaces,
       startVisit, editVisit, saveVisitForm, removeVisit, discardVisitDraft, setReturnInWeeks, openLightbox, stepLightbox,
       markdown, formatDateTime, shortDate, relative, returnBadgeClass, firstLine, timesSummary,
-      mapQuery, mapsUrl, directionsUrl
+      mapQuery, mapsUrl, directionsUrl,
+      visitMonth, visitStudyCounted, monthLabel, formatMinutes, monthKey, addMonths,
+      reportMonth, summary, reportName, currentReportText, changedSinceSent, reportHistory, reportComments,
+      openReport, stepMonth, setShared, saveComments, saveReportName, sendReport,
+      studyName, studyPersonId, studyCandidates, studySuggestions, studyDisplayName, addStudyPerson, addStudyName, removeStudy,
+      personStudyMonth, personStudyCounted, togglePersonStudy,
+      timer, timerElapsed, startTimer, stopTimer, timeForm, newTimeEntry, editTimeEntry, setDuration, saveTimeForm, removeTimeEntry,
+      scanner, scannerVideo, openScanner, closeScanner
     };
   }
 });

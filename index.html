@@ -42,6 +42,9 @@
           <p v-if="subtitle" class="truncate text-xs" :class="subtitleClass">{{ subtitle }}</p>
         </div>
         <template v-if="view === 'list'">
+          <button class="icon-btn" @click="openReport()" aria-label="Monthly report">
+            <i class="bi bi-clipboard-data"></i>
+          </button>
           <button class="icon-btn" :class="syncIcon.color" @click="syncNow" :aria-label="syncIcon.label">
             <i class="bi" :class="syncIcon.icon"></i>
           </button>
@@ -62,7 +65,16 @@
     </header>
 
     <!-- Notices -->
-    <div v-if="updateReady || (view === 'list' && (store.status === 'auth' || showInstallTip))" class="mx-auto max-w-xl space-y-2 px-3 pt-3">
+    <div v-if="updateReady || (view === 'list' && (store.status === 'auth' || showInstallTip)) || (['list', 'report'].includes(view) && (timer || store.needsScriptUpdate))" class="mx-auto max-w-xl space-y-2 px-3 pt-3">
+      <div v-if="timer && ['list', 'report'].includes(view)" class="flex items-center gap-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900 ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-100 dark:ring-emerald-800">
+        <i class="bi bi-stopwatch text-lg"></i>
+        <span class="flex-1">Timer <b class="font-mono tabular-nums">{{ timerElapsed }}</b></span>
+        <button class="btn" @click="stopTimer"><i class="bi bi-stop-fill"></i> Stop</button>
+      </div>
+      <div v-if="store.needsScriptUpdate && ['list', 'report'].includes(view)" class="flex items-start gap-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+        <i class="bi bi-cloud-arrow-up text-lg"></i>
+        <p class="flex-1">Your time, studies, and reports are saved on this device, but the spreadsheet’s script needs updating before they can sync. Paste the new <b>Code.gs</b> and deploy a new version.</p>
+      </div>
       <div v-if="updateReady" class="card flex items-center gap-3 p-3 text-sm">
         <i class="bi bi-stars text-lg text-indigo-600 dark:text-indigo-400"></i>
         <span class="flex-1">A new version of RV Notes is ready.</span>
@@ -95,9 +107,10 @@
         <ol class="list-decimal space-y-1 pl-5 text-sm">
           <li>Open your RV Notes spreadsheet on a computer.</li>
           <li>Choose <b>RV Notes → Connect app</b>.</li>
-          <li>Scan the QR code with this device’s camera, or copy the link and paste it here.</li>
+          <li>Tap <b>Scan QR code</b> and point the camera at the code, or copy the link and paste it here.</li>
         </ol>
-        <button class="btn-primary w-full" @click="startAddConnection"><i class="bi bi-link-45deg"></i> Paste a link</button>
+        <button class="btn-primary w-full" @click="openScanner"><i class="bi bi-qr-code-scan"></i> Scan QR code</button>
+        <button class="btn w-full" @click="startAddConnection"><i class="bi bi-link-45deg"></i> Paste a link</button>
         <p class="text-xs text-slate-500 dark:text-slate-400">
           Setting up a spreadsheet for the first time? Follow the
           <a class="text-indigo-600 underline dark:text-indigo-400" href="https://github.com/westc/rv-notes#set-up-a-spreadsheet" target="_blank" rel="noopener">setup steps</a>.
@@ -135,6 +148,7 @@
     <main v-else-if="view === 'addConnection'" class="mx-auto max-w-xl p-3">
       <form class="space-y-4" @submit.prevent="saveConnectionForm">
         <div class="card space-y-4 p-4">
+          <button type="button" class="btn w-full" @click="openScanner"><i class="bi bi-qr-code-scan"></i> Scan QR code</button>
           <div>
             <label class="label" for="connectLink">Link from the spreadsheet</label>
             <textarea id="connectLink" v-model="connectForm.link" class="input font-mono text-xs" rows="3" required
@@ -149,10 +163,10 @@
           <div v-if="isIos && !isStandalone && connectLink" class="space-y-2 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-950 ring-1 ring-indigo-200 dark:bg-indigo-950 dark:text-indigo-100 dark:ring-indigo-800">
             <p>On iPhone and iPad, the Home Screen app keeps its notes separate from Safari. To use RV Notes from your Home Screen:</p>
             <ol class="list-decimal space-y-1 pl-5">
-              <li>Tap <b>Copy link</b>.</li>
               <li>Tap <i class="bi bi-box-arrow-up"></i> <b>Share</b>, then <b>Add to Home Screen</b>.</li>
-              <li>Open RV Notes from your Home Screen, tap <b>Paste a link</b>, and paste.</li>
+              <li>Open RV Notes from your Home Screen and tap <b>Scan QR code</b>.</li>
             </ol>
+            <p>Or tap <b>Copy link</b> and paste it in the Home Screen app.</p>
             <button type="button" class="btn w-full" @click="copyText(connectForm.link)"><i class="bi bi-clipboard"></i> Copy link</button>
             <p class="text-xs">Or tap <b>Connect</b> below to use RV Notes in Safari.</p>
           </div>
@@ -220,6 +234,11 @@
             <i class="bi bi-calendar-event"></i> Return {{ formatDateTime(current.returnAt) }} ({{ relative(current.returnAt, now) }})
           </span>
         </div>
+
+        <button v-if="current.isStudy || personStudyCounted" class="btn w-full justify-start" :class="personStudyCounted ? 'ring-emerald-300 dark:ring-emerald-700' : ''" @click="togglePersonStudy">
+          <i class="bi" :class="personStudyCounted ? 'bi-check-circle-fill text-emerald-600 dark:text-emerald-400' : 'bi-circle'"></i>
+          {{ personStudyCounted ? 'Counted as a study in ' + monthLabel(personStudyMonth) : 'Count as a study in ' + monthLabel(personStudyMonth) }}
+        </button>
 
         <p v-if="current.address" class="whitespace-pre-line">{{ current.address }}</p>
         <div v-if="current.coordinates" ref="miniMapEl" class="z-0 h-40 overflow-hidden rounded-lg"></div>
@@ -424,6 +443,16 @@
           </div>
         </div>
 
+        <label v-if="!visitForm.id" class="card flex items-center justify-between gap-3 p-4">
+          <span>
+            <span class="block font-medium">Bible study</span>
+            <span class="block text-xs text-slate-500 dark:text-slate-400">
+              {{ visitStudyCounted ? 'Already counted in ' + monthLabel(visitMonth) + '.' : 'Count ' + (current ? current.name : 'them') + ' as a study in ' + monthLabel(visitMonth) + '.' }}
+            </span>
+          </span>
+          <input type="checkbox" v-model="visitForm.countStudy" :disabled="visitStudyCounted" class="h-6 w-6 rounded accent-indigo-600">
+        </label>
+
         <div v-if="visitForm.updateReturnAt" class="card space-y-2 p-4">
           <label class="label" for="visitReturnAt">Next return visit (optional)</label>
           <input id="visitReturnAt" v-model="visitForm.returnAt" type="datetime-local" class="input">
@@ -447,6 +476,188 @@
         </button>
       </form>
     </main>
+
+    <!-- Monthly report -->
+    <main v-else-if="view === 'report'" class="mx-auto max-w-xl space-y-3 p-3">
+      <div class="flex items-center gap-2">
+        <button class="icon-btn" @click="stepMonth(-1)" aria-label="Previous month"><i class="bi bi-chevron-left"></i></button>
+        <h2 class="flex-1 text-center text-lg font-semibold">{{ monthLabel(reportMonth) }}</h2>
+        <button class="icon-btn" @click="stepMonth(1)" :disabled="reportMonth >= monthKey()" aria-label="Next month"><i class="bi bi-chevron-right"></i></button>
+      </div>
+
+      <section class="card space-y-3 p-4">
+        <div class="flex items-end justify-between gap-3">
+          <div>
+            <h3 class="label">Hours</h3>
+            <p class="text-3xl font-semibold tabular-nums">{{ summary.service.liveHours }}</p>
+          </div>
+          <div class="text-right text-xs text-slate-500 dark:text-slate-400">
+            <p>{{ formatMinutes(summary.service.minutes) }} logged</p>
+            <p v-if="summary.service.carriedIn">+ {{ summary.service.carriedIn }} min from {{ monthLabel(addMonths(reportMonth, -1)) }}</p>
+            <p v-if="summary.service.liveCarriedOut">{{ summary.service.liveCarriedOut }} min carry to {{ monthLabel(addMonths(reportMonth, 1)) }}</p>
+          </div>
+        </div>
+        <div v-if="summary.credit.minutes || summary.credit.carriedIn" class="flex items-end justify-between gap-3 border-t border-slate-200 pt-3 dark:border-slate-700">
+          <div>
+            <h3 class="label">Credit hours</h3>
+            <p class="text-xl font-semibold tabular-nums">{{ summary.credit.liveHours }}</p>
+          </div>
+          <div class="text-right text-xs text-slate-500 dark:text-slate-400">
+            <p>{{ formatMinutes(summary.credit.minutes) }} logged</p>
+            <p v-if="summary.credit.carriedIn">+ {{ summary.credit.carriedIn }} min carried in</p>
+            <p v-if="summary.credit.liveCarriedOut">{{ summary.credit.liveCarriedOut }} min carry forward</p>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn flex-1" @click="newTimeEntry"><i class="bi bi-plus-lg"></i> Add time</button>
+          <button v-if="!timer" class="btn flex-1" @click="startTimer"><i class="bi bi-stopwatch"></i> Start timer</button>
+          <button v-else class="btn flex-1" @click="stopTimer"><i class="bi bi-stop-fill"></i> Stop {{ timerElapsed }}</button>
+        </div>
+        <ul v-if="summary.entries.length" class="divide-y divide-slate-200 dark:divide-slate-700">
+          <li v-for="entry in summary.entries" :key="entry.id">
+            <button class="flex w-full items-center gap-3 py-2 text-left" @click="editTimeEntry(entry)">
+              <span class="w-20 shrink-0 text-sm text-slate-500 dark:text-slate-400">{{ shortDate(entry.date + 'T12:00:00') }}</span>
+              <span class="min-w-0 flex-1 truncate text-sm">{{ entry.note }}</span>
+              <span v-if="entry.kind === 'credit'" class="badge badge-later shrink-0">Credit</span>
+              <span class="shrink-0 text-sm font-medium tabular-nums">{{ formatMinutes(entry.minutes) }}</span>
+            </button>
+          </li>
+        </ul>
+      </section>
+
+      <section class="card space-y-3 p-4">
+        <div class="flex items-baseline justify-between">
+          <h3 class="label">Bible studies</h3>
+          <span class="text-xl font-semibold tabular-nums">{{ summary.studies.length }}</span>
+        </div>
+        <ul v-if="summary.studies.length" class="space-y-1">
+          <li v-for="study in summary.studies" :key="study.id" class="flex items-center gap-2 text-sm">
+            <i class="bi" :class="study.personId ? 'bi-person' : 'bi-person-plus'"></i>
+            <span class="flex-1">{{ studyDisplayName(study) }}</span>
+            <button class="icon-btn h-8 w-8 text-base" @click="removeStudy(study)" :aria-label="'Remove ' + studyDisplayName(study)"><i class="bi bi-x-lg"></i></button>
+          </li>
+        </ul>
+        <div v-if="studySuggestions.length" class="flex flex-wrap gap-2">
+          <button v-for="person in studySuggestions" :key="person.id" class="chip chip-off" @click="addStudyPerson(person)">
+            <i class="bi bi-plus"></i> {{ person.name }}
+          </button>
+        </div>
+        <select v-if="studyCandidates.length" v-model="studyPersonId" class="input" aria-label="Add an RV as a study"
+          @change="studyPersonId && addStudyPerson(studyCandidates.find(p => p.id === studyPersonId))">
+          <option value="">Add an RV…</option>
+          <option v-for="person in studyCandidates" :key="person.id" :value="person.id">{{ person.name }}</option>
+        </select>
+        <div class="flex gap-2">
+          <input v-model="studyName" class="input flex-1" placeholder="Someone else’s name" aria-label="Another study’s name" @keydown.enter.prevent="addStudyName">
+          <button class="btn" @click="addStudyName" :disabled="!studyName.trim()">Add</button>
+        </div>
+      </section>
+
+      <section class="card space-y-4 p-4">
+        <div>
+          <h3 class="label">Shared in the ministry</h3>
+          <div class="flex gap-2">
+            <button v-for="option in [{ value: '', label: 'Automatic' }, { value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]" :key="option.value"
+              class="chip" :class="(summary.report ? summary.report.shared : '') === option.value ? 'chip-on' : 'chip-off'" @click="setShared(option.value)">
+              {{ option.label }}
+            </button>
+          </div>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {{ summary.shared ? 'Yes' : 'No' }}<template v-if="!summary.report || !summary.report.shared"> (automatic: {{ summary.sharedAuto ? 'you logged time, a visit, or a study this month' : 'nothing logged this month yet' }})</template>
+          </p>
+        </div>
+        <div>
+          <label class="label" for="reportComments">Comments</label>
+          <textarea id="reportComments" v-model="reportComments" class="input" rows="2" @blur="saveComments" placeholder="Optional"></textarea>
+        </div>
+        <div>
+          <label class="label" for="reportName">Your name on reports</label>
+          <input id="reportName" :value="reportName" class="input" placeholder="Optional" autocomplete="name" @change="saveReportName">
+        </div>
+      </section>
+
+      <section class="card space-y-3 p-4">
+        <div class="flex items-center justify-between">
+          <h3 class="label">Report</h3>
+          <span v-if="summary.sent" class="badge badge-study"><i class="bi bi-check2"></i> Sent {{ shortDate(summary.report.sentAt) }}</span>
+        </div>
+        <pre class="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 font-sans text-sm dark:bg-slate-900">{{ currentReportText }}</pre>
+        <p v-if="changedSinceSent" class="text-xs text-amber-700 dark:text-amber-300">
+          This has changed since it was sent. What was sent is still what counts toward carrying minutes into next month until you send it again.
+        </p>
+        <button class="btn-primary w-full" @click="sendReport">
+          <i class="bi bi-send"></i> {{ summary.sent ? 'Send again' : 'Send report' }}
+        </button>
+      </section>
+
+      <section class="space-y-2">
+        <h2 class="section-title">Months</h2>
+        <ul class="card divide-y divide-slate-200 dark:divide-slate-700">
+          <li v-for="item in reportHistory" :key="item.month">
+            <button class="flex w-full items-center gap-3 px-4 py-3 text-left" :class="item.month === reportMonth ? 'bg-indigo-50 dark:bg-indigo-950' : ''" @click="openReport(item.month)">
+              <span class="flex-1 font-medium">{{ item.label }}</span>
+              <span class="text-sm text-slate-500 dark:text-slate-400">{{ item.hours }} h &middot; {{ item.studies }} {{ item.studies === 1 ? 'study' : 'studies' }}</span>
+              <i v-if="item.sent" class="bi bi-check-circle-fill text-emerald-600 dark:text-emerald-400" aria-label="Sent"></i>
+              <i v-else class="bi bi-circle text-slate-300 dark:text-slate-600" aria-label="Not sent"></i>
+            </button>
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <!-- Add / edit time -->
+    <main v-else-if="view === 'timeEntry'" class="mx-auto max-w-xl p-3">
+      <form class="space-y-4" @submit.prevent="saveTimeForm">
+        <div class="card space-y-4 p-4">
+          <div>
+            <label class="label" for="timeDate">Date</label>
+            <input id="timeDate" v-model="timeForm.date" type="date" class="input" required>
+          </div>
+          <div>
+            <span class="label">Time</span>
+            <div class="flex items-center gap-2">
+              <input v-model.number="timeForm.hours" type="number" min="0" max="24" inputmode="numeric" class="input w-20" aria-label="Hours">
+              <span class="text-sm">h</span>
+              <input v-model.number="timeForm.minutes" type="number" min="0" max="59" inputmode="numeric" class="input w-20" aria-label="Minutes">
+              <span class="text-sm">min</span>
+            </div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button v-for="minutes in [15, 30, 60, 90, 120]" :key="minutes" type="button" class="chip chip-off" @click="setDuration(minutes)">
+                {{ formatMinutes(minutes) }}
+              </button>
+            </div>
+          </div>
+          <div>
+            <span class="label">Kind</span>
+            <div class="flex gap-2">
+              <button type="button" class="chip" :class="timeForm.kind === 'service' ? 'chip-on' : 'chip-off'" @click="timeForm.kind = 'service'">Ministry</button>
+              <button type="button" class="chip" :class="timeForm.kind === 'credit' ? 'chip-on' : 'chip-off'" @click="timeForm.kind = 'credit'">Credit</button>
+            </div>
+          </div>
+          <div>
+            <label class="label" for="timeNote">Note</label>
+            <input id="timeNote" v-model="timeForm.note" class="input" placeholder="Optional" autocomplete="off">
+          </div>
+        </div>
+        <button type="submit" class="btn-primary w-full"><i class="bi bi-check-lg"></i> {{ timeForm.id ? 'Save Changes' : 'Save Time' }}</button>
+        <button v-if="timeForm.id" type="button" class="btn-danger w-full" @click="removeTimeEntry"><i class="bi bi-trash"></i> Delete</button>
+      </form>
+    </main>
+
+    <!-- QR code scanner -->
+    <div v-if="scanner.open" class="fixed inset-0 z-50 flex flex-col bg-black text-white">
+      <div class="flex items-center justify-between p-2">
+        <span class="px-2 text-sm font-medium">Scan QR code</span>
+        <button class="icon-btn text-white" @click="closeScanner" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="relative flex-1 overflow-hidden">
+        <video ref="scannerVideo" class="absolute inset-0 h-full w-full object-cover" playsinline muted></video>
+        <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div class="aspect-square w-2/3 max-w-xs rounded-2xl border-4 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]"></div>
+        </div>
+      </div>
+      <p class="p-4 text-center text-sm">{{ scanner.message }}</p>
+    </div>
 
     <!-- Picture viewer -->
     <div v-if="lightbox" class="fixed inset-0 z-50 flex flex-col bg-black/95" @click.self="lightbox = null">

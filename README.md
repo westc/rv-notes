@@ -8,6 +8,8 @@ kept in a Google Sheet you own.
 - Look someone up and add a visit with notes. Their visits are listed newest first.
 - See who is due. People with a return date are listed first, soonest first, and overdue
   dates are shown in red.
+- Keep track of your time (with a timer) and Bible studies each month, then send your
+  monthly report from your phone's share menu. Past months' reports are kept.
 - Works without internet. Everything is saved on your phone first and syncs with the
   spreadsheet when you're back online.
 - Connect more than one spreadsheet (for example "Chris' RVs" and "Stacey's RVs") and
@@ -19,7 +21,7 @@ kept in a Google Sheet you own.
 | --- | --- | --- |
 | The app (`index.html`, `js/`, `styles.css`, `sw.js`, …) | GitHub Pages: https://westc.github.io/rv-notes/ | The screens you use. It's a Progressive Web App, so it can be added to your home screen and opened without internet. One copy serves everyone. |
 | The backend (`apps-script/Code.gs`) | An Apps Script attached to each person's spreadsheet | Saves and reads the spreadsheet. It only answers requests that include the spreadsheet's secret key. |
-| The data | The Google Sheet | One row per person, visit, and picture. |
+| The data | The Google Sheet | One row per person, visit, picture, time entry, study, and monthly report. |
 
 GitHub only hosts the app's files. Your notes go straight from your phone to your
 spreadsheet and never pass through GitHub.
@@ -40,16 +42,14 @@ Each person who wants their own RV list does this once.
 6. Back in the spreadsheet, reload the page. Choose **RV Notes → Connect app** (on a
    computer, since Sheets on phones doesn't show custom menus), and paste the web app URL
    if it isn't filled in already.
-7. On your phone:
-   - **Android:** scan the QR code with the camera, then tap **Connect**. Then add the app
-     to your home screen (Chrome: **⋮ → Add to Home screen** or **Install app**).
-   - **iPhone/iPad:** the Home Screen app keeps its data separate from Safari, so install
-     first. Open https://westc.github.io/rv-notes/ in Safari, tap **Share → Add to Home
-     Screen**, and open RV Notes from your Home Screen. Then scan the QR code with the
-     camera; Safari opens and offers **Copy link**. Go back to the Home Screen app, tap
-     **Paste a link**, and paste.
+7. On your phone, open https://westc.github.io/rv-notes/ and add it to your home screen
+   (iPhone Safari: **Share → Add to Home Screen**. Android Chrome: **⋮ → Add to Home
+   screen** or **Install app**). Open RV Notes from the home screen, tap **Scan QR code**,
+   and point the camera at the code in the dialog. Then tap **Connect**.
 
-     Or copy the link in the dialog on your computer and send it to yourself.
+   Install before connecting: on iPhone and iPad, the Home Screen app keeps its data
+   separate from Safari. You can also copy the link in the dialog, send it to yourself,
+   and use **Paste a link**.
 
 To add another spreadsheet (for example your spouse's), tap the spreadsheet name at the top
 of the list, then **Add a spreadsheet**.
@@ -96,6 +96,11 @@ After pasting a new `Code.gs`, use **Deploy → Manage deployments → Edit (pen
 Version: New version → Deploy** so the same URL serves the new code. The URL and key stay
 the same, so devices keep syncing.
 
+If the app is newer than a spreadsheet's script (for example, time and reports were added
+but the script wasn't updated yet), RVs and visits keep syncing. Time, studies, and reports
+are kept on the device, with a notice asking you to update the script, and they sync as
+soon as it is.
+
 ## Using the app
 
 - **Syncing.** The cloud icon at the top of the list shows the sync status. Tap it to sync
@@ -112,6 +117,24 @@ the same, so devices keep syncing.
   remove one from this device, or download everything again. Removing one only deletes the
   copy on this device.
 - **Updates.** When a new version of the app is published, a **Reload** banner appears.
+- **Monthly report.** Tap the clipboard icon at the top of the list. Pick the month with the arrows,
+  or tap one under **Months** (a check mark means it was sent).
+  - **Time.** **Add time** logs a date, hours and minutes, ministry or credit time, and
+    an optional note. **Start timer** keeps running even if you close the app. **Stop**
+    fills in the time for you to save. Tap an entry to change or delete it.
+  - **Hours** are whole hours. Leftover minutes carry into the next month, and the screen
+    shows how many came in and how many carry forward. Credit hours are counted and
+    carried separately.
+  - **Bible studies.** Tap an RV marked Studying to count them, pick another RV, or type
+    someone else's name. You can also count a study from an RV's page (**Count as a study
+    in …**) or when saving a visit (**Bible study**, checked automatically for RVs marked
+    Studying). Each person counts once per month, even if added on two phones.
+  - **Shared in the ministry** is **Yes** automatically once you log time, a visit, or a
+    study that month. Choose **Yes** or **No** to set it yourself.
+  - **Send report** opens your phone's share menu with the report text, so you can pick
+    Messages, WhatsApp, email, and so on. Once it's shared, the month is marked as sent,
+    and what was sent is saved. If you change the month later, the app says so and offers
+    **Send again**. Minutes carried into the next month come from what was sent.
 - **List.** Search matches names, addresses, descriptions, and available times. Filters:
   **Due** (return date today or earlier), **Upcoming**, and **Studies**.
 - **Person.** Shows a map, **Open in Maps** and **Directions** links (they use the
@@ -188,9 +211,48 @@ and lowers the quality, then the size, until it fits. A typical phone photo ends
 Large picture cells make the **Pictures** sheet slow to scroll. You can hide that sheet
 (right-click the tab → **Hide sheet**). The app still works with it hidden.
 
+### Time
+
+| Column | Contents |
+| --- | --- |
+| ID | Made by the app. |
+| Date | `yyyy-mm-dd` (text, so it never shifts with time zones). |
+| Minutes | Whole minutes, 1 to 1,440. |
+| Kind | `service` or `credit`. |
+| Note | Optional. |
+| Updated At, Synced At | As in **RVs**. |
+
+### Studies
+
+One row per Bible study counted in a month.
+
+| Column | Contents |
+| --- | --- |
+| ID | Made by the app. |
+| Month | `yyyy-mm`. |
+| Person ID | The RV, if the study is one. Empty for a name you typed. |
+| Name | The study's name, kept even if the RV is deleted later. |
+| Updated At, Synced At | As in **RVs**. |
+
+### Reports
+
+One row per month (ID `report-yyyy-mm`), made once you change something on that month's
+report or send it.
+
+| Column | Contents |
+| --- | --- |
+| Month | `yyyy-mm`. |
+| Shared | `yes`, `no`, or empty for automatic. |
+| Comments | The comments line. |
+| Sent At | When it was last sent. Empty if it hasn't been. |
+| Hours, Credit Hours, Studies | What was sent. |
+| Carried Minutes, Carried Credit Minutes | Leftover minutes carried into the next month when it was sent. |
+| Report Text | The exact text that was sent. |
+| Updated At, Synced At | As in **RVs**. |
+
 ### Deleted
 
-One row per deleted person or visit (**ID**, **Table**, **Deleted At**, **Synced At**), so
+One row per deleted person, visit, time entry, or study (**ID**, **Table**, **Deleted At**, **Synced At**), so
 other devices find out about deletions the next time they sync. Don't delete these rows
 unless every device has synced since.
 
@@ -233,7 +295,7 @@ npm run build      # vendor libraries, icons, Tailwind CSS, and sw.js
 
 | Command | What it does |
 | --- | --- |
-| `npm run vendor` | Copies Vue, Leaflet, marked, DOMPurify, and Bootstrap Icons from `node_modules` into `vendor/`. |
+| `npm run vendor` | Copies Vue, Leaflet, marked, DOMPurify, Bootstrap Icons, and jsQR from `node_modules` into `vendor/`. |
 | `npm run icons` | Draws the PNG icons in `icons/`. |
 | `npm run css` | Builds `styles.css` from `src/styles.css` with Tailwind. Run it after adding classes. |
 | `npm run stamp` | Lists the app's files in `sw.js` and sets its version. **Run it before every commit that changes the app**, or devices won't get the update. |

@@ -216,3 +216,50 @@ test('finds places by address and by Google Maps link', () => {
   assert.equal(fromLink[0].coordinates, '35.061234, -85.307123');
   assert.match(post(backend, { key: KEY, action: 'findPlaces', params: { query: 'https://example.com/x' } }).error, /Only Google Maps/);
 });
+
+test('syncs time entries, studies, and reports', () => {
+  const backend = loadBackend();
+  const now = new Date().toISOString();
+  const result = call(backend, 'sync', {
+    since: '',
+    changes: [
+      { table: 'time', op: 'put', id: 'time-0000-0001', updatedAt: now, record: { date: '2026-10-03', minutes: 95, kind: 'service', note: 'Morning' } },
+      { table: 'time', op: 'put', id: 'time-0000-0002', updatedAt: now, record: { date: '2026-10-04', minutes: 60, kind: 'credit' } },
+      { table: 'studies', op: 'put', id: 'study-0000-0001', updatedAt: now, record: { month: '2026-10', personId: P1, name: 'Ann' } },
+      { table: 'studies', op: 'put', id: 'study-0000-0002', updatedAt: now, record: { month: '2026-10', name: 'Someone else' } },
+      { table: 'reports', op: 'put', id: 'report-2026-10', updatedAt: now, record: {
+        month: '2026-10', shared: 'yes', comments: 'Hi', sentAt: now, hours: 1, creditHours: 1, studies: 2,
+        carriedMinutes: 35, carriedCreditMinutes: 0, text: 'Report text' } }
+    ]
+  });
+  assert.deepEqual(result.rejected, []);
+  assert.deepEqual(result.tables, ['people', 'visits', 'time', 'studies', 'reports']);
+  assert.deepEqual(result.time.map(t => [t.date, t.minutes, t.kind]), [['2026-10-03', 95, 'service'], ['2026-10-04', 60, 'credit']]);
+  assert.deepEqual(result.studies.map(s => [s.month, s.personId, s.name]), [['2026-10', P1, 'Ann'], ['2026-10', '', 'Someone else']]);
+  assert.equal(result.reports[0].carriedMinutes, 35);
+  assert.equal(result.reports[0].sentAt, now);
+  assert.equal(result.reports[0].text, 'Report text');
+
+  // Dates are kept as text, so they don't shift with time zones.
+  const sheet = backend.spreadsheet.getSheetByName('Time');
+  assert.equal(sheet.rows[1][1], '2026-10-03');
+
+  call(backend, 'sync', { since: '', changes: [{ table: 'time', op: 'delete', id: 'time-0000-0001' }] });
+  assert.deepEqual(call(backend, 'sync', { since: '', changes: [] }).time.map(t => t.id), ['time-0000-0002']);
+});
+
+test('rejects invalid time entries, studies, and reports', () => {
+  const backend = loadBackend();
+  const result = call(backend, 'sync', {
+    since: '',
+    changes: [
+      { table: 'time', op: 'put', id: 'time-0000-0001', record: { date: '2026-13-01', minutes: 30 } },
+      { table: 'time', op: 'put', id: 'time-0000-0002', record: { date: '2026-10-01', minutes: 0 } },
+      { table: 'time', op: 'put', id: 'time-0000-0003', record: { date: '2026-10-01', minutes: 1.5 } },
+      { table: 'studies', op: 'put', id: 'study-0000-0001', record: { month: '2026-10', name: ' ' } },
+      { table: 'studies', op: 'put', id: 'study-0000-0002', record: { month: 'October', name: 'Ann' } },
+      { table: 'reports', op: 'put', id: 'report-2026-10', record: { month: '2026-10', hours: -1 } }
+    ]
+  });
+  assert.equal(result.rejected.length, 6);
+});

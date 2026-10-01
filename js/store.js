@@ -12,6 +12,10 @@ const ACTIVE_KEY = 'rv-notes/activeConnection';
 const RECORDS_PER_SYNC = 200;
 const PICTURES_PER_REQUEST = 10;
 const SYNC_DELAY = 1500;
+// The record tables that sync. Scripts from before reports only know the
+// first two, so the rest wait in the outbox until the script is updated.
+export const TABLES = ['people', 'visits', 'time', 'studies', 'reports'];
+const OLD_SCRIPT_TABLES = ['people', 'visits'];
 
 // IndexedDB can't store Vue's reactive proxies, so records are copied first.
 function plain(value) {
@@ -29,6 +33,9 @@ export function createStore() {
     active: null,
     people: [],
     visits: [],
+    time: [],
+    studies: [],
+    reports: [],
     // Data URLs of pictures the UI asked for, by ID. '' means loading or not
     // downloaded yet.
     pictures: {},
@@ -36,6 +43,8 @@ export function createStore() {
     // idle, syncing, offline, error, or auth (the key was rejected).
     status: 'idle',
     statusMessage: '',
+    // Changes are waiting for tables the spreadsheet's script doesn't have yet.
+    needsScriptUpdate: false,
     ready: false
   });
 
@@ -68,6 +77,7 @@ export function createStore() {
     state.pictures = {};
     state.status = 'idle';
     state.statusMessage = '';
+    state.needsScriptUpdate = false;
     missingPictures.clear();
     if (connection) storage.set(ACTIVE_KEY, connection.id);
     await reload();
@@ -76,17 +86,15 @@ export function createStore() {
   async function reload() {
     const conn = state.active && state.active.id;
     if (!conn) {
-      state.people = [];
-      state.visits = [];
+      TABLES.forEach(table => state[table] = []);
       state.pending = 0;
       return;
     }
-    const [people, visits, pending] = await Promise.all([
-      db.getAll('people', conn), db.getAll('visits', conn), db.getAll('outbox', conn)
+    const [pending, ...tables] = await Promise.all([
+      db.getAll('outbox', conn), ...TABLES.map(table => db.getAll(table, conn))
     ]);
     if (!state.active || state.active.id !== conn) return;
-    state.people = people.map(withoutConn);
-    state.visits = visits.map(withoutConn);
+    TABLES.forEach((table, i) => state[table] = tables[i].map(withoutConn));
     state.pending = pending.length;
   }
 
@@ -271,6 +279,30 @@ export function createStore() {
     await afterChange();
   }
 
+  /**
+   * Saves a time entry, study, or report on this device. Records need an id
+   * and get a new updatedAt.
+   */
+  async function saveRecord(table, record) {
+    const conn = state.active.id;
+    const saved = plain({ ...record, updatedAt: nowIso() });
+    await db.transaction([table, 'outbox'], 'readwrite', async s => {
+      s[table].put({ conn, ...saved });
+      await queue(s, conn, [{ kind: 'record', table, op: 'put', id: saved.id }]);
+    });
+    await afterChange();
+    return saved;
+  }
+
+  async function deleteRecord(table, id) {
+    const conn = state.active.id;
+    await db.transaction([table, 'outbox'], 'readwrite', async s => {
+      s[table].delete([conn, id]);
+      await queue(s, conn, [{ kind: 'record', table, op: 'delete', id }]);
+    });
+    await afterChange();
+  }
+
   /* -- Pictures ----------------------------------------------------- */
 
   /** Loads pictures from this device into state.pictures. */
@@ -403,7 +435,9 @@ export function createStore() {
    */
   async function syncRecords(connection) {
     const conn = connection.id;
-    const waiting = (await db.getAll('outbox', conn)).filter(e => e.kind === 'record');
+    const supported = connection.tables || OLD_SCRIPT_TABLES;
+    const records = (await db.getAll('outbox', conn)).filter(e => e.kind === 'record');
+    const waiting = records.filter(e => supported.includes(e.table));
     const entries = waiting.slice(0, RECORDS_PER_SYNC);
     const changes = [];
     for (const entry of entries) {
@@ -421,13 +455,24 @@ export function createStore() {
     const result = await callApi(connection, 'sync', { since: connection.cursor || '', changes });
     await applySync(connection, result, entries);
     if (result.rejected.length) emit('rejected', result.rejected);
-    return waiting.length > entries.length;
+
+    // An updated script says which tables it has, so changes that were
+    // waiting for it can go now.
+    const nowSupported = connection.tables || OLD_SCRIPT_TABLES;
+    const unsent = records.filter(e => !supported.includes(e.table));
+    const canSendMore = unsent.some(e => nowSupported.includes(e.table));
+    if (state.active && state.active.id === conn) {
+      state.needsScriptUpdate = unsent.some(e => !nowSupported.includes(e.table));
+    }
+    return waiting.length > entries.length || canSendMore;
   }
 
   async function applySync(connection, result, sent) {
     const conn = connection.id;
     const sentSeqs = new Set(sent.map(e => e.seq));
-    await db.transaction(['connections', 'people', 'visits', 'pictures', 'outbox'], 'readwrite', async s => {
+    // Scripts from before reports only send people and visits.
+    const tables = TABLES.filter(table => Array.isArray(result[table]));
+    await db.transaction(['connections', 'outbox', ...TABLES], 'readwrite', async s => {
       sent.forEach(entry => s.outbox.delete(entry.seq));
       // Records changed on this device during the sync keep the local version
       // until that change is sent.
@@ -436,26 +481,23 @@ export function createStore() {
       const isWaiting = (table, id) => waiting.some(e => e.table === table && e.id === id);
 
       const visits = await promisify(s.visits.index('conn').getAll(conn));
-      if (result.full) {
-        // Everything the spreadsheet has came back, so anything else is gone.
-        const keepPeople = new Set(result.people.map(p => p.id));
-        const keepVisits = new Set(result.visits.map(v => v.id));
-        const people = await promisify(s.people.index('conn').getAllKeys(conn));
-        people.filter(([, id]) => !keepPeople.has(id) && !isWaiting('people', id)).forEach(key => s.people.delete(key));
-        visits.filter(v => !keepVisits.has(v.id) && !isWaiting('visits', v.id)).forEach(v => s.visits.delete([conn, v.id]));
-      }
-      result.people.filter(p => !isWaiting('people', p.id)).forEach(p => s.people.put({ conn, ...p }));
-      result.visits.filter(v => !isWaiting('visits', v.id)).forEach(v => s.visits.put({ conn, ...v }));
-      result.deleted.forEach(({ table, id }) => {
-        if (table === 'people') {
-          s.people.delete([conn, id]);
-          visits.filter(v => v.personId === id).forEach(v => s.visits.delete([conn, v.id]));
-        } else if (table === 'visits') {
-          s.visits.delete([conn, id]);
+      for (const table of tables) {
+        if (result.full) {
+          // Everything the spreadsheet has came back, so anything else is gone.
+          const keep = new Set(result[table].map(record => record.id));
+          const keys = await promisify(s[table].index('conn').getAllKeys(conn));
+          keys.filter(([, id]) => !keep.has(id) && !isWaiting(table, id)).forEach(key => s[table].delete(key));
         }
+        result[table].filter(record => !isWaiting(table, record.id)).forEach(record => s[table].put({ conn, ...record }));
+      }
+      result.deleted.forEach(({ table, id }) => {
+        if (!TABLES.includes(table)) return;
+        s[table].delete([conn, id]);
+        if (table === 'people') visits.filter(v => v.personId === id).forEach(v => s.visits.delete([conn, v.id]));
       });
 
       connection.cursor = result.cursor;
+      if (Array.isArray(result.tables)) connection.tables = result.tables;
       s.connections.put(plain(connection));
     });
   }
@@ -472,6 +514,8 @@ export function createStore() {
     deletePerson,
     saveVisit,
     deleteVisit,
+    saveRecord,
+    deleteRecord,
     loadPictures,
     sync,
     scheduleSync,

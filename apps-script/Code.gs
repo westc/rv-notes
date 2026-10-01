@@ -35,6 +35,31 @@ const TABLES = {
     dates: ['Created At'],
     checkboxes: []
   },
+  // Time spent in the ministry. Date is text (yyyy-mm-dd) so it never shifts
+  // with time zones. Kind is "service" or "credit".
+  time: {
+    name: 'Time',
+    headers: ['ID', 'Date', 'Minutes', 'Kind', 'Note', 'Updated At', 'Synced At'],
+    dates: [],
+    checkboxes: []
+  },
+  // Bible studies conducted each month (yyyy-mm). Person ID links to an RV and
+  // may be empty. Name is kept even if the RV is deleted later.
+  studies: {
+    name: 'Studies',
+    headers: ['ID', 'Month', 'Person ID', 'Name', 'Updated At', 'Synced At'],
+    dates: [],
+    checkboxes: []
+  },
+  // One row per month (ID "report-yyyy-mm"). Shared is "yes", "no", or empty
+  // for automatic. The columns from Sent At on are what was sent.
+  reports: {
+    name: 'Reports',
+    headers: ['ID', 'Month', 'Shared', 'Comments', 'Sent At', 'Hours', 'Credit Hours', 'Studies',
+      'Carried Minutes', 'Carried Credit Minutes', 'Report Text', 'Updated At', 'Synced At'],
+    dates: [],
+    checkboxes: []
+  },
   // Lets other devices find out what was deleted since they last synced.
   deleted: {
     name: 'Deleted',
@@ -61,6 +86,8 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const PERIODS = ['Morning', 'Afternoon', 'Evening'];
 
 const DATE_FORMAT = 'yyyy-mm-dd h:mm am/pm';
+const MONTH_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/;
+const DAY_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 const ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
 
 /* ------------------------------------------------------------------------ */
@@ -139,7 +166,8 @@ function checkKey_(key) {
 function info_() {
   return {
     name: SpreadsheetApp.getActiveSpreadsheet().getName(),
-    maxPictureBytes: MAX_PICTURE_BYTES
+    maxPictureBytes: MAX_PICTURE_BYTES,
+    tables: Object.keys(SYNC_TABLES)
   };
 }
 
@@ -227,7 +255,8 @@ const CONNECT_DIALOG_HTML = `<!DOCTYPE html>
   <p class="hint">In Apps Script: Deploy → Manage deployments → copy the Web app URL (it ends in /exec).</p>
 
   <div id="qr"></div>
-  <p class="hint" style="text-align:center">Scan this with your phone’s camera to open the app and connect.</p>
+  <p class="hint" style="text-align:center">In the RV Notes app, tap <b>Scan QR code</b> and point it at this code.
+    (Your phone’s camera app works too.)</p>
 
   <label for="link">Or copy the link</label>
   <div class="row">
@@ -292,21 +321,32 @@ const CONNECT_DIALOG_HTML = `<!DOCTYPE html>
 /* Sync                                                                     */
 /* ------------------------------------------------------------------------ */
 
+// The tables the app syncs. fields() checks the app's record and turns it into
+// sheet fields; toApp() turns a sheet row back into the app's record.
+const SYNC_TABLES = {
+  people: { fields: personFields_, toApp: toPerson_ },
+  visits: { fields: visitFields_, toApp: toVisit_ },
+  time: { fields: timeFields_, toApp: toTime_ },
+  studies: { fields: studyFields_, toApp: toStudy_ },
+  reports: { fields: reportFields_, toApp: toReport_ }
+};
+
 /**
  * Saves the app's changes, then returns what changed since the app last
  * synced.
  *
- * Each change is {table: "people"|"visits", op: "put"|"delete", id, record,
- * updatedAt}. When two devices edit the same record, the edit with the later
- * updatedAt wins. Deleting always wins, and deleting a person also deletes
- * their visits and pictures.
+ * Each change is {table, op: "put"|"delete", id, record, updatedAt}, where
+ * table is a key of SYNC_TABLES. When two devices edit the same record, the
+ * edit with the later updatedAt wins. Deleting always wins, and deleting a
+ * person also deletes their visits and pictures.
  *
  * @param {{since: string, changes: Object[]}} params since is the cursor from
  *     the previous sync, or empty to get everything.
- * @returns {{cursor: string, full: boolean, people: Object[], visits: Object[],
- *     deleted: {table: string, id: string}[], rejected: Object[]}} people and
- *     visits include every record changed since the cursor plus every record
- *     the request touched, so the app always ends up with the saved version.
+ * @returns {{cursor: string, full: boolean, tables: string[],
+ *     deleted: {table: string, id: string}[], rejected: Object[]}} Also has an
+ *     array per table (people, visits, …) with every record changed since the
+ *     cursor plus every record the request touched, so the app always ends up
+ *     with the saved version. tables lists which tables this script syncs.
  */
 function sync_(params) {
   const changes = Array.isArray(params.changes) ? params.changes : [];
@@ -314,18 +354,14 @@ function sync_(params) {
   const since = typeof params.since === 'string' ? params.since : '';
 
   return withLock_(() => {
-    const db = {
-      people: loadTable_('people'),
-      visits: loadTable_('visits'),
-      deleted: loadTable_('deleted'),
-      removedPictureIds: [],
-      removedPicturePeople: []
-    };
+    const tableKeys = Object.keys(SYNC_TABLES);
+    const db = { deleted: loadTable_('deleted'), removedPictureIds: [], removedPicturePeople: [] };
+    tableKeys.forEach(key => db[key] = loadTable_(key));
     const now = new Date().toISOString();
 
     // Rows typed into the sheet by hand have no Synced At, so they're marked
     // to reach the app on its next sync.
-    ['people', 'visits'].forEach(key => db[key].records.forEach(record => {
+    tableKeys.forEach(key => db[key].records.forEach(record => {
       if (!record['Synced At']) setFields_(db[key], record, { 'Synced At': now });
     }));
 
@@ -341,13 +377,14 @@ function sync_(params) {
       touched[id] = true;
     });
 
-    ['people', 'visits', 'deleted'].forEach(key => saveTable_(db[key]));
+    tableKeys.concat('deleted').forEach(key => saveTable_(db[key]));
     deletePictureRows_(db.removedPictureIds, db.removedPicturePeople);
 
-    const result = { cursor: now, full: !since, people: [], visits: [], deleted: [], rejected };
+    const result = { cursor: now, full: !since, tables: tableKeys, deleted: [], rejected };
     const isNew = record => !since || touched[String(record['ID'])] || toIso_(record['Synced At']) >= since;
-    db.people.records.filter(r => !r._deleted && isNew(r)).forEach(r => result.people.push(toPerson_(r)));
-    db.visits.records.filter(r => !r._deleted && isNew(r)).forEach(r => result.visits.push(toVisit_(r)));
+    tableKeys.forEach(key => {
+      result[key] = db[key].records.filter(r => !r._deleted && isNew(r)).map(r => SYNC_TABLES[key].toApp(r));
+    });
     if (since) {
       db.deleted.records.filter(isNew).forEach(r => result.deleted.push({ table: String(r['Table']), id: String(r['ID']) }));
     }
@@ -356,7 +393,9 @@ function sync_(params) {
 }
 
 function applyChange_(db, change, now) {
-  if (!change || (change.table !== 'people' && change.table !== 'visits')) throw new Error('Unknown table.');
+  if (!change || !Object.prototype.hasOwnProperty.call(SYNC_TABLES, change.table)) {
+    throw new Error('Unknown table. The app may be newer than this script. Update the script and deploy a new version.');
+  }
   const id = checkId_(change.id);
   const table = db[change.table];
   const existing = table.byId[id];
@@ -377,17 +416,15 @@ function applyChange_(db, change, now) {
   // A newer edit is already saved.
   if (existing && toIso_(existing['Updated At']) > updatedAt) return;
 
-  let fields;
+  const fields = SYNC_TABLES[change.table].fields(change.record || {}, existing);
   if (change.table === 'people') {
-    fields = personFields_(change.record || {}, existing);
     if (existing) {
       const kept = splitList_(fields['Pictures']);
       splitList_(existing['Pictures']).forEach(pictureId => {
         if (kept.indexOf(pictureId) < 0) db.removedPictureIds.push(pictureId);
       });
     }
-  } else {
-    fields = visitFields_(change.record || {}, existing);
+  } else if (change.table === 'visits') {
     // The person was deleted on another device.
     if (db.deleted.byId[fields['Person ID']]) {
       addTombstone_(db, 'visits', id, now);
@@ -443,6 +480,57 @@ function visitFields_(input, existing) {
     'Created At': toDate_(input.createdAt) || (existing && toDate_(existing['Created At'])) || new Date(),
     'Notes': cleanText_(input.notes, 'Notes')
   };
+}
+
+function timeFields_(input) {
+  const date = String(input.date || '');
+  if (!DAY_PATTERN.test(date)) throw new Error('Time entries need a date.');
+  const minutes = Number(input.minutes);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) {
+    throw new Error('A time entry must be between 1 minute and 24 hours.');
+  }
+  return {
+    'Date': date,
+    'Minutes': minutes,
+    'Kind': input.kind === 'credit' ? 'credit' : 'service',
+    'Note': cleanText_(input.note, 'Note', 2000)
+  };
+}
+
+function studyFields_(input) {
+  const name = cleanText_(input.name, 'Name', 500);
+  if (!name) throw new Error('Studies need a name.');
+  return {
+    'Month': checkMonth_(input.month),
+    'Person ID': input.personId ? checkId_(input.personId) : '',
+    'Name': name
+  };
+}
+
+function reportFields_(input) {
+  const count = (value, label) => {
+    if (value === '' || value == null) return '';
+    const number = Number(value);
+    if (!Number.isInteger(number) || number < 0 || number > 1000000) throw new Error(`${label} must be a whole number.`);
+    return number;
+  };
+  return {
+    'Month': checkMonth_(input.month),
+    'Shared': input.shared === 'yes' || input.shared === 'no' ? input.shared : '',
+    'Comments': cleanText_(input.comments, 'Comments', 5000),
+    'Sent At': toIso_(input.sentAt),
+    'Hours': count(input.hours, 'Hours'),
+    'Credit Hours': count(input.creditHours, 'Credit hours'),
+    'Studies': count(input.studies, 'Studies'),
+    'Carried Minutes': count(input.carriedMinutes, 'Carried minutes'),
+    'Carried Credit Minutes': count(input.carriedCreditMinutes, 'Carried credit minutes'),
+    'Report Text': cleanText_(input.text, 'Report text', 10000)
+  };
+}
+
+function checkMonth_(value) {
+  if (!MONTH_PATTERN.test(String(value || ''))) throw new Error('Invalid month.');
+  return value;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -703,6 +791,56 @@ function toVisit_(record) {
     notes: String(record['Notes']),
     updatedAt: toIso_(record['Updated At'])
   };
+}
+
+function toTime_(record) {
+  return {
+    id: String(record['ID']),
+    date: toDay_(record['Date']),
+    minutes: Number(record['Minutes']) || 0,
+    kind: record['Kind'] === 'credit' ? 'credit' : 'service',
+    note: String(record['Note']),
+    updatedAt: toIso_(record['Updated At'])
+  };
+}
+
+function toStudy_(record) {
+  return {
+    id: String(record['ID']),
+    month: toDay_(record['Month']).slice(0, 7),
+    personId: String(record['Person ID']),
+    name: String(record['Name']),
+    updatedAt: toIso_(record['Updated At'])
+  };
+}
+
+function toReport_(record) {
+  const number = value => value === '' || value == null || isNaN(Number(value)) ? '' : Number(value);
+  return {
+    id: String(record['ID']),
+    month: toDay_(record['Month']).slice(0, 7),
+    shared: record['Shared'] === 'yes' || record['Shared'] === 'no' ? record['Shared'] : '',
+    comments: String(record['Comments']),
+    sentAt: toIso_(record['Sent At']),
+    hours: number(record['Hours']),
+    creditHours: number(record['Credit Hours']),
+    studies: number(record['Studies']),
+    carriedMinutes: number(record['Carried Minutes']),
+    carriedCreditMinutes: number(record['Carried Credit Minutes']),
+    text: String(record['Report Text']),
+    updatedAt: toIso_(record['Updated At'])
+  };
+}
+
+/**
+ * Dates and months are stored as text, but Sheets turns ones typed by hand
+ * into real dates. Either way this returns "yyyy-mm-dd" (or "yyyy-mm" text
+ * as is).
+ */
+function toDay_(value) {
+  if (!isDate_(value)) return String(value == null ? '' : value).trim();
+  const pad = n => String(n).padStart(2, '0');
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
 }
 
 function isId_(value) {

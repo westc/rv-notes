@@ -10,7 +10,9 @@ const files = {
   'leaflet/dist/leaflet.css': 'leaflet/leaflet.css',
   'leaflet/dist/images': 'leaflet/images',
   'bootstrap-icons/font/bootstrap-icons.min.css': 'bootstrap-icons/bootstrap-icons.min.css',
-  'bootstrap-icons/font/fonts': 'bootstrap-icons/fonts'
+  'bootstrap-icons/font/fonts': 'bootstrap-icons/fonts',
+  // Loaded only when scanning a QR code on browsers without BarcodeDetector.
+  'jsqr/dist/jsQR.js': 'jsQR.js'
 };
 
 rmSync('vendor', { recursive: true, force: true });
