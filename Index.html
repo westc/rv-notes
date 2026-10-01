@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <style>
+    [v-cloak] { display: none; }
+    body { -webkit-tap-highlight-color: transparent; }
+  </style>
+  <style type="text/tailwindcss">
+    @layer components {
+      .card { @apply rounded-xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700; }
+      .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ring-1 ring-slate-300 bg-white text-slate-700 active:bg-slate-100 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600 dark:active:bg-slate-700; }
+      .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-base font-semibold bg-indigo-600 text-white active:bg-indigo-700 disabled:opacity-50; }
+      .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 bg-white active:bg-red-50 disabled:opacity-50 dark:bg-slate-800 dark:text-red-400 dark:ring-red-900; }
+      .icon-btn { @apply inline-flex h-10 w-10 items-center justify-center rounded-full text-xl text-slate-600 active:bg-slate-200 disabled:opacity-50 dark:text-slate-300 dark:active:bg-slate-700; }
+      .input { @apply block w-full rounded-lg border-0 bg-white px-3 py-2 text-base text-slate-900 ring-1 ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:outline-none dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-600; }
+      .label { @apply mb-1 block text-sm font-medium text-slate-600 dark:text-slate-300; }
+      .chip { @apply shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ring-1; }
+      .chip-on { @apply bg-indigo-600 text-white ring-indigo-600; }
+      .chip-off { @apply bg-white text-slate-600 ring-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-600; }
+      .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold; }
+      .badge-study { @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200; }
+      .badge-overdue { @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200; }
+      .badge-today { @apply bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200; }
+      .badge-later { @apply bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200; }
+      .section-title { @apply px-1 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+  <div id="app" v-cloak class="min-h-screen pb-10">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+      <div class="mx-auto flex h-14 max-w-xl items-center gap-1 px-2">
+        <button v-if="view !== 'list'" class="icon-btn" @click="goBack" :disabled="!!busy" aria-label="Back">
+          <i class="bi bi-chevron-left"></i>
+        </button>
+        <div class="min-w-0 flex-1 px-1">
+          <h1 class="truncate text-lg font-semibold leading-tight">{{ title }}</h1>
+          <p v-if="subtitle" class="truncate text-xs text-slate-500 dark:text-slate-400">{{ subtitle }}</p>
+        </div>
+        <template v-if="view === 'list'">
+          <button class="icon-btn" @click="refresh" :disabled="!!busy" aria-label="Refresh">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+          <button class="icon-btn text-indigo-600 dark:text-indigo-400" @click="newPerson" :disabled="!!busy" aria-label="Add RV">
+            <i class="bi bi-plus-circle-fill"></i>
+          </button>
+        </template>
+        <button v-else-if="view === 'person'" class="icon-btn" @click="editPerson" :disabled="!!busy" aria-label="Edit">
+          <i class="bi bi-pencil"></i>
+        </button>
+      </div>
+      <div v-if="busy" class="h-0.5 w-full overflow-hidden bg-indigo-100 dark:bg-indigo-950">
+        <div class="h-full w-1/3 animate-pulse bg-indigo-500"></div>
+      </div>
+    </header>
+
+    <!-- List -->
+    <main v-if="view === 'list'" class="mx-auto max-w-xl space-y-3 p-3">
+      <div class="relative">
+        <i class="bi bi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+        <input v-model="search" type="search" class="input pl-9" placeholder="Search names, addresses, descriptions">
+      </div>
+      <div class="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
+        <button v-for="f in filters" :key="f.key" class="chip" :class="filter === f.key ? 'chip-on' : 'chip-off'" @click="filter = f.key">
+          {{ f.label }} <span class="opacity-70">{{ f.count }}</span>
+        </button>
+      </div>
+
+      <div v-if="!people.length" class="card p-6 text-center text-slate-500 dark:text-slate-400">
+        <i class="bi bi-journal-plus text-4xl"></i>
+        <p class="mt-2">No return visits yet.</p>
+        <button class="btn-primary mt-4" @click="newPerson"><i class="bi bi-plus-lg"></i> Add your first RV</button>
+      </div>
+      <p v-else-if="!filteredPeople.length" class="p-6 text-center text-slate-500 dark:text-slate-400">No one matches.</p>
+
+      <ul class="space-y-2">
+        <li v-for="person in filteredPeople" :key="person.id">
+          <button class="card flex w-full items-start gap-3 p-3 text-left active:bg-slate-50 dark:active:bg-slate-700" @click="openPerson(person)">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate font-semibold">{{ person.name }}</span>
+                <span v-if="person.isStudy" class="badge badge-study shrink-0"><i class="bi bi-book"></i> Study</span>
+              </div>
+              <p v-if="person.address" class="truncate text-sm text-slate-500 dark:text-slate-400">{{ firstLine(person.address) }}</p>
+              <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {{ person.lastVisitAt ? 'Last visit ' + relative(person.lastVisitAt) : 'No visits yet' }}
+                <template v-if="person.visitCount > 1"> &middot; {{ person.visitCount }} visits</template>
+              </p>
+            </div>
+            <span v-if="person.returnAt" class="badge shrink-0" :class="returnBadgeClass(person.returnAt)">
+              <i class="bi bi-calendar-event"></i> {{ shortDate(person.returnAt) }}
+            </span>
+          </button>
+        </li>
+      </ul>
+    </main>
+
+    <!-- Person -->
+    <main v-else-if="view === 'person' && current" class="mx-auto max-w-xl space-y-3 p-3">
+      <section class="card space-y-3 p-4">
+        <div v-if="current.isStudy || current.returnAt" class="flex flex-wrap gap-2">
+          <span v-if="current.isStudy" class="badge badge-study"><i class="bi bi-book"></i> Study</span>
+          <span v-if="current.returnAt" class="badge" :class="returnBadgeClass(current.returnAt)">
+            <i class="bi bi-calendar-event"></i> Return {{ formatDateTime(current.returnAt) }} ({{ relative(current.returnAt) }})
+          </span>
+        </div>
+
+        <p v-if="current.address" class="whitespace-pre-line">{{ current.address }}</p>
+        <div v-if="current.coordinates" ref="miniMapEl" class="z-0 h-40 overflow-hidden rounded-lg"></div>
+        <div v-if="mapQuery(current)" class="flex gap-2">
+          <a class="btn flex-1" :href="mapsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-geo-alt"></i> Open in Maps</a>
+          <a class="btn flex-1" :href="directionsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-sign-turn-right"></i> Directions</a>
+        </div>
+
+        <div v-if="current.availableTimes.length">
+          <h3 class="label">Available</h3>
+          <ul class="text-sm">
+            <li v-for="line in timesSummary(current.availableTimes)" :key="line">{{ line }}</li>
+          </ul>
+        </div>
+
+        <div v-if="current.description" class="prose prose-sm max-w-none dark:prose-invert" v-html="markdown(current.description)"></div>
+
+        <p v-if="!current.address && !current.coordinates && !current.description && !current.availableTimes.length" class="text-sm text-slate-500 dark:text-slate-400">
+          No details yet. Tap <i class="bi bi-pencil"></i> to add an address, location, or description.
+        </p>
+      </section>
+
+      <section v-if="current.pictures.length" class="grid grid-cols-3 gap-2">
+        <button v-for="(id, index) in current.pictures" :key="id" class="aspect-square overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700" @click="openLightbox(current.pictures, index)">
+          <img v-if="pictureCache[id]" :src="pictureCache[id]" class="h-full w-full object-cover" alt="">
+          <i v-else class="bi bi-image text-2xl text-slate-400"></i>
+        </button>
+      </section>
+
+      <button class="btn-primary w-full" @click="startVisit" :disabled="!!busy"><i class="bi bi-plus-lg"></i> Add Visit</button>
+
+      <section class="space-y-2">
+        <h2 class="section-title">Visits <span v-if="!loadingVisits">({{ visits.length }})</span></h2>
+        <p v-if="loadingVisits" class="p-4 text-center text-sm text-slate-500"><i class="bi bi-hourglass-split"></i> Loading visits…</p>
+        <p v-else-if="!visits.length" class="p-4 text-center text-sm text-slate-500 dark:text-slate-400">No visits yet.</p>
+        <article v-for="visit in visits" :key="visit.id" class="card p-3">
+          <div class="flex items-start gap-2">
+            <div class="flex-1">
+              <p class="text-sm font-semibold">{{ formatDateTime(visit.createdAt) }}</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400">{{ relative(visit.createdAt) }}</p>
+            </div>
+            <button class="icon-btn -mr-1 -mt-1 h-8 w-8 text-base" @click="editVisit(visit)" :disabled="!!busy" aria-label="Edit visit">
+              <i class="bi bi-pencil"></i>
+            </button>
+          </div>
+          <div v-if="visit.notes" class="prose prose-sm mt-2 max-w-none dark:prose-invert" v-html="markdown(visit.notes)"></div>
+          <p v-else class="mt-2 text-sm italic text-slate-400">No notes</p>
+        </article>
+      </section>
+    </main>
+
+    <!-- Add / edit person -->
+    <main v-else-if="view === 'editPerson'" class="mx-auto max-w-xl p-3">
+      <form class="space-y-4" @submit.prevent="savePersonForm">
+        <div class="card space-y-4 p-4">
+          <div>
+            <label class="label" for="name">Name <span class="text-red-500">*</span></label>
+            <input id="name" v-model="form.name" class="input" required autocomplete="off" placeholder="Who did you talk to?">
+          </div>
+
+          <div>
+            <label class="label" for="address">Address</label>
+            <textarea id="address" v-model="form.address" class="input" rows="2" placeholder="Street, apartment, landmarks…"></textarea>
+          </div>
+
+          <div>
+            <label class="label" for="coordinates">Location on map</label>
+            <div class="flex gap-2">
+              <input id="coordinates" v-model="form.coordinates" class="input flex-1" autocomplete="off" placeholder="Latitude, longitude">
+              <button type="button" class="btn" @click="useMyLocation" :disabled="locating" aria-label="Use my location">
+                <i class="bi" :class="locating ? 'bi-hourglass-split' : 'bi-crosshair'"></i>
+              </button>
+              <button type="button" class="btn" :class="{ 'ring-2 ring-indigo-500': pickerOpen }" @click="togglePicker" aria-label="Pick on map">
+                <i class="bi bi-map"></i>
+              </button>
+            </div>
+            <template v-if="pickerOpen">
+              <div ref="pickerEl" class="z-0 mt-2 h-72 overflow-hidden rounded-lg"></div>
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Tap the map to drop a pin, then drag it to adjust.</p>
+            </template>
+          </div>
+
+          <label class="flex items-center justify-between gap-3">
+            <span>
+              <span class="block font-medium">Studying</span>
+              <span class="block text-xs text-slate-500 dark:text-slate-400">This person currently has a study.</span>
+            </span>
+            <input type="checkbox" v-model="form.isStudy" class="h-6 w-6 rounded accent-indigo-600">
+          </label>
+
+          <div>
+            <label class="label" for="returnAt">Return at</label>
+            <div class="flex gap-2">
+              <input id="returnAt" v-model="form.returnAt" type="datetime-local" class="input flex-1">
+              <button v-if="form.returnAt" type="button" class="btn" @click="form.returnAt = ''" aria-label="Clear return date">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card p-4">
+          <h3 class="label">Available times</h3>
+          <div class="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-1">
+            <span></span>
+            <button v-for="period in periods" :key="period" type="button" class="py-1 text-xs font-medium text-slate-500 dark:text-slate-400" @click="toggleColumn(period)">
+              {{ period }}
+            </button>
+            <template v-for="day in days" :key="day">
+              <button type="button" class="pr-3 text-left text-sm font-medium" @click="toggleRow(day)">{{ day }}</button>
+              <button v-for="period in periods" :key="period" type="button" class="h-9 rounded-md ring-1"
+                :class="form.availableTimes.includes(day + ' ' + period) ? 'chip-on' : 'chip-off'"
+                @click="toggleTimes([day + ' ' + period])" :aria-label="day + ' ' + period">
+                <i v-if="form.availableTimes.includes(day + ' ' + period)" class="bi bi-check-lg"></i>
+              </button>
+            </template>
+          </div>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Tap a day or a time of day to toggle the whole row or column.</p>
+        </div>
+
+        <div class="card p-4">
+          <h3 class="label">Description</h3>
+          <md-editor v-model="form.description" placeholder="What did you talk about? Interests, family, things to remember…"></md-editor>
+        </div>
+
+        <div class="card p-4">
+          <h3 class="label">Pictures</h3>
+          <div class="grid grid-cols-3 gap-2">
+            <div v-for="(id, index) in form.pictures" :key="id" class="relative aspect-square overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700">
+              <img v-if="pictureCache[id]" :src="pictureCache[id]" class="h-full w-full object-cover" alt="">
+              <button type="button" class="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" @click="form.pictures.splice(index, 1)" aria-label="Remove picture">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div v-for="(pic, index) in form.newPictures" :key="pic.key" class="relative aspect-square overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700">
+              <img :src="pic.dataUrl" class="h-full w-full object-cover" alt="">
+              <span class="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] text-white">{{ Math.round(pic.bytes / 1024) }} KB</span>
+              <button type="button" class="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" @click="form.newPictures.splice(index, 1)" aria-label="Remove picture">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
+              <i class="bi text-2xl" :class="processingPictures ? 'bi-hourglass-split' : 'bi-camera'"></i>
+              <span class="text-xs">{{ processingPictures ? 'Shrinking…' : 'Add photos' }}</span>
+              <input type="file" accept="image/*" multiple class="hidden" @change="addPictureFiles" :disabled="processingPictures">
+            </label>
+          </div>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Photos are shrunk to {{ Math.round(maxPictureBytes / 1024) }} KB or less before they're saved.</p>
+        </div>
+
+        <button type="submit" class="btn-primary w-full" :disabled="!!busy || processingPictures">
+          <i class="bi bi-check-lg"></i> {{ form.id ? 'Save Changes' : 'Add RV' }}
+        </button>
+        <button v-if="form.id" type="button" class="btn-danger w-full" @click="removePerson" :disabled="!!busy">
+          <i class="bi bi-trash"></i> Delete {{ form.name || 'this person' }}
+        </button>
+      </form>
+    </main>
+
+    <!-- Add / edit visit -->
+    <main v-else-if="view === 'visit'" class="mx-auto max-w-xl p-3">
+      <form class="space-y-4" @submit.prevent="saveVisitForm">
+        <div class="card space-y-4 p-4">
+          <div>
+            <label class="label" for="visitCreatedAt">Visit started</label>
+            <input id="visitCreatedAt" v-model="visitForm.createdAt" type="datetime-local" class="input" required>
+          </div>
+          <div>
+            <h3 class="label">Notes</h3>
+            <md-editor v-model="visitForm.notes" :rows="8" placeholder="What did you discuss? What will you talk about next time?"></md-editor>
+            <p v-if="!visitForm.id" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              <i class="bi bi-cloud-check"></i> A draft is kept on this device until you save.
+            </p>
+          </div>
+        </div>
+
+        <div v-if="visitForm.updateReturnAt" class="card space-y-2 p-4">
+          <label class="label" for="visitReturnAt">Next return visit (optional)</label>
+          <input id="visitReturnAt" v-model="visitForm.returnAt" type="datetime-local" class="input">
+          <div class="flex flex-wrap gap-2">
+            <button v-for="weeks in [1, 2, 4]" :key="weeks" type="button" class="chip chip-off" @click="setReturnInWeeks(weeks)">
+              +{{ weeks }} {{ weeks === 1 ? 'week' : 'weeks' }}
+            </button>
+            <button v-if="visitForm.returnAt" type="button" class="chip chip-off" @click="visitForm.returnAt = ''">Clear</button>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Saved as {{ current ? current.name : 'this person' }}'s Return At. Leave it blank to clear it.</p>
+        </div>
+
+        <button type="submit" class="btn-primary w-full" :disabled="!!busy">
+          <i class="bi bi-check-lg"></i> {{ visitForm.id ? 'Save Changes' : 'Save Visit' }}
+        </button>
+        <button v-if="visitForm.id" type="button" class="btn-danger w-full" @click="removeVisit" :disabled="!!busy">
+          <i class="bi bi-trash"></i> Delete Visit
+        </button>
+        <button v-else-if="hasVisitDraft" type="button" class="btn w-full" @click="discardVisitDraft" :disabled="!!busy">
+          Discard Draft
+        </button>
+      </form>
+    </main>
+
+    <!-- Picture viewer -->
+    <div v-if="lightbox" class="fixed inset-0 z-50 flex flex-col bg-black/95" @click.self="lightbox = null">
+      <div class="flex items-center justify-between p-2 text-white">
+        <span class="px-2 text-sm">{{ lightbox.index + 1 }} / {{ lightbox.ids.length }}</span>
+        <button class="icon-btn text-white" @click="lightbox = null" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="relative flex flex-1 items-center justify-center overflow-hidden" @click.self="lightbox = null">
+        <img v-if="pictureCache[lightbox.ids[lightbox.index]]" :src="pictureCache[lightbox.ids[lightbox.index]]" class="max-h-full max-w-full object-contain" alt="">
+        <i v-else class="bi bi-hourglass-split text-3xl text-white"></i>
+        <button v-if="lightbox.ids.length > 1" class="icon-btn absolute left-2 bg-black/40 text-white" @click="stepLightbox(-1)" aria-label="Previous"><i class="bi bi-chevron-left"></i></button>
+        <button v-if="lightbox.ids.length > 1" class="icon-btn absolute right-2 bg-black/40 text-white" @click="stepLightbox(1)" aria-label="Next"><i class="bi bi-chevron-right"></i></button>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div v-if="toast" class="fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+      <div class="flex max-w-md items-start gap-3 rounded-xl px-4 py-3 text-sm text-white shadow-lg" :class="toast.error ? 'bg-red-600' : 'bg-slate-800'">
+        <span class="flex-1">{{ toast.message }}</span>
+        <button @click="toast = null" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const initData = JSON.parse(<?= JSON.stringify(initData) ?>);
+    const { createApp, ref, reactive, computed, watch, nextTick } = Vue;
+
+    /* ---------------------------------------------------------------- */
+    /* Helpers                                                          */
+    /* ---------------------------------------------------------------- */
+
+    function callServer(funcName, ...args) {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)[funcName](...args);
+      });
+    }
+
+    DOMPurify.addHook('afterSanitizeAttributes', node => {
+      if (node.tagName === 'A') {
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noopener noreferrer');
+      }
+    });
+
+    function markdown(text) {
+      return text ? DOMPurify.sanitize(marked.parse(text, { breaks: true })) : '';
+    }
+
+    // localStorage can be blocked when the app is embedded (for example in
+    // Safari inside Google Sites), so failures are ignored.
+    const storage = {
+      get(key) {
+        try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
+      },
+      set(key, value) {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+      },
+      remove(key) {
+        try { localStorage.removeItem(key); } catch (e) {}
+      }
+    };
+
+    function pad(n) {
+      return String(n).padStart(2, '0');
+    }
+
+    // ISO string -> value for <input type="datetime-local"> in local time.
+    function toLocalInput(iso) {
+      const date = iso ? new Date(iso) : null;
+      if (!date || isNaN(date)) return '';
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function fromLocalInput(value) {
+      const date = value ? new Date(value) : null;
+      return date && !isNaN(date) ? date.toISOString() : '';
+    }
+
+    function formatDateTime(iso) {
+      const date = new Date(iso);
+      const options = { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+      if (date.getFullYear() !== new Date().getFullYear()) options.year = 'numeric';
+      return date.toLocaleString(undefined, options);
+    }
+
+    function shortDate(iso) {
+      const date = new Date(iso);
+      const options = { month: 'short', day: 'numeric' };
+      if (date.getFullYear() !== new Date().getFullYear()) options.year = '2-digit';
+      return date.toLocaleDateString(undefined, options);
+    }
+
+    const relativeFormat = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+    function relative(iso) {
+      const date = new Date(iso);
+      const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const days = Math.round((startOfDay(date) - startOfDay(new Date())) / 86400000);
+      if (Math.abs(days) < 1) {
+        const minutes = Math.round((date - new Date()) / 60000);
+        if (Math.abs(minutes) < 60) return relativeFormat.format(minutes, 'minute');
+        return relativeFormat.format(Math.round(minutes / 60), 'hour');
+      }
+      if (Math.abs(days) < 14) return relativeFormat.format(days, 'day');
+      if (Math.abs(days) < 60) return relativeFormat.format(Math.round(days / 7), 'week');
+      if (Math.abs(days) < 730) return relativeFormat.format(Math.round(days / 30.4), 'month');
+      return relativeFormat.format(Math.round(days / 365), 'year');
+    }
+
+    function endOfToday() {
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    }
+
+    function returnBadgeClass(iso) {
+      const date = new Date(iso);
+      if (date < new Date()) return 'badge-overdue';
+      if (date < endOfToday()) return 'badge-today';
+      return 'badge-later';
+    }
+
+    function firstLine(text) {
+      return String(text).split('\n')[0];
+    }
+
+    function parseCoords(text) {
+      const match = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(text || '');
+      if (!match) return null;
+      const lat = Number(match[1]);
+      const lng = Number(match[2]);
+      return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? [lat, lng] : null;
+    }
+
+    function formatCoords(lat, lng) {
+      return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    }
+
+    function mapQuery(person) {
+      const coords = parseCoords(person.coordinates);
+      return coords ? coords.join(',') : person.address.replace(/\s*\n\s*/g, ', ');
+    }
+
+    function mapsUrl(person) {
+      return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(mapQuery(person));
+    }
+
+    function directionsUrl(person) {
+      return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(mapQuery(person));
+    }
+
+    function addTiles(map) {
+      // Leaflet's own credit link would open over the whole app.
+      map.attributionControl.setPrefix(false);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+      }).addTo(map);
+    }
+
+    function base64Bytes(dataUrl) {
+      const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+      return base64.length / 4 * 3 - (base64.match(/=*$/)[0].length);
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error(`Couldn't read ${file.name}.`));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function loadImage(src, name) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`${name} isn't an image this browser can open.`));
+        img.src = src;
+      });
+    }
+
+    // Re-encodes a photo as a JPEG, lowering the quality and then the size
+    // until it fits in maxBytes.
+    async function shrinkImage(file, maxBytes) {
+      const img = await loadImage(await readFileAsDataUrl(file), file.name);
+      let maxSide = 1600;
+      let quality = 0.85;
+      for (let attempt = 0; attempt < 25; attempt++) {
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        const bytes = base64Bytes(dataUrl);
+        if (bytes <= maxBytes) return { dataUrl, bytes };
+        if (quality > 0.55) {
+          quality -= 0.1;
+        } else {
+          maxSide = Math.round(Math.min(maxSide, Math.max(canvas.width, canvas.height)) * 0.8);
+          quality = 0.75;
+        }
+      }
+      throw new Error(`Couldn't shrink ${file.name} enough.`);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Markdown editor                                                  */
+    /* ---------------------------------------------------------------- */
+
+    const MdEditor = {
+      props: {
+        modelValue: { type: String, default: '' },
+        placeholder: String,
+        rows: { type: Number, default: 6 }
+      },
+      emits: ['update:modelValue'],
+      setup() {
+        return { preview: ref(false), markdown };
+      },
+      template: `
+        <div class="overflow-hidden rounded-lg ring-1 ring-slate-300 focus-within:ring-2 focus-within:ring-indigo-500 dark:ring-slate-600">
+          <div class="flex items-center border-b border-slate-200 bg-slate-50 text-sm dark:border-slate-700 dark:bg-slate-800">
+            <button type="button" class="px-3 py-2" :class="preview ? 'text-slate-500' : 'font-semibold text-indigo-600 dark:text-indigo-400'" @click="preview = false">Write</button>
+            <button type="button" class="px-3 py-2" :class="preview ? 'font-semibold text-indigo-600 dark:text-indigo-400' : 'text-slate-500'" @click="preview = true">Preview</button>
+            <a class="ml-auto px-3 py-2 text-xs text-slate-500" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noopener">Markdown help</a>
+          </div>
+          <textarea v-if="!preview" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)"
+            :rows="rows" :placeholder="placeholder"
+            class="block w-full resize-y border-0 bg-white p-3 text-base focus:outline-none focus:ring-0 dark:bg-slate-900"></textarea>
+          <div v-else class="prose prose-sm min-h-[8rem] max-w-none bg-white p-3 dark:prose-invert dark:bg-slate-900">
+            <div v-if="modelValue" v-html="markdown(modelValue)"></div>
+            <p v-else class="italic text-slate-400">Nothing to preview.</p>
+          </div>
+        </div>`
+    };
+
+    /* ---------------------------------------------------------------- */
+    /* App                                                              */
+    /* ---------------------------------------------------------------- */
+
+    const app = createApp({
+      setup() {
+        const days = initData.days;
+        const periods = initData.periods;
+        const maxPictureBytes = initData.maxPictureBytes;
+
+        const view = ref('list');
+        const busy = ref('');
+        const toast = ref(null);
+        const people = ref(initData.people);
+        const search = ref('');
+        const filter = ref('all');
+        const currentId = ref('');
+        const visits = ref([]);
+        const loadingVisits = ref(false);
+        const pictureCache = reactive({});
+        const lightbox = ref(null);
+
+        const current = computed(() => people.value.find(person => person.id === currentId.value) || null);
+
+        let toastTimer = null;
+        function showToast(message, error) {
+          clearTimeout(toastTimer);
+          toast.value = { message, error: !!error };
+          toastTimer = setTimeout(() => toast.value = null, error ? 8000 : 3000);
+        }
+        function showError(err) {
+          showToast(err && err.message ? err.message : String(err), true);
+        }
+
+        async function run(message, task) {
+          busy.value = message;
+          try {
+            return await task();
+          } catch (err) {
+            showError(err);
+            throw err;
+          } finally {
+            busy.value = '';
+          }
+        }
+
+        function upsertPerson(person) {
+          const index = people.value.findIndex(p => p.id === person.id);
+          if (index < 0) {
+            people.value.push({ visitCount: 0, lastVisitAt: '', ...person });
+          } else {
+            people.value[index] = { ...people.value[index], ...person };
+          }
+        }
+
+        function show(name) {
+          view.value = name;
+          window.scrollTo(0, 0);
+        }
+
+        /* -- List ------------------------------------------------------ */
+
+        const matchesFilter = {
+          all: () => true,
+          due: person => person.returnAt && new Date(person.returnAt) < endOfToday(),
+          upcoming: person => person.returnAt && new Date(person.returnAt) >= endOfToday(),
+          study: person => person.isStudy
+        };
+
+        const filters = computed(() => [
+          { key: 'all', label: 'All' },
+          { key: 'due', label: 'Due' },
+          { key: 'upcoming', label: 'Upcoming' },
+          { key: 'study', label: 'Studies' }
+        ].map(f => ({ ...f, count: people.value.filter(matchesFilter[f.key]).length })));
+
+        // People with a return date come first (soonest first), then everyone
+        // else by most recent activity.
+        function comparePeople(a, b) {
+          if (a.returnAt && b.returnAt) return a.returnAt.localeCompare(b.returnAt);
+          if (a.returnAt || b.returnAt) return a.returnAt ? -1 : 1;
+          return (b.lastVisitAt || b.createdAt).localeCompare(a.lastVisitAt || a.createdAt);
+        }
+
+        const filteredPeople = computed(() => {
+          const terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+          return people.value
+            .filter(matchesFilter[filter.value])
+            .filter(person => {
+              const text = [person.name, person.address, person.description, person.availableTimes.join(' ')].join('\n').toLowerCase();
+              return terms.every(term => text.includes(term));
+            })
+            .sort(comparePeople);
+        });
+
+        function refresh() {
+          run('Refreshing…', () => callServer('getPeople'))
+            .then(result => people.value = result)
+            .catch(() => {});
+        }
+
+        /* -- Person ---------------------------------------------------- */
+
+        function loadPictures(ids) {
+          ids.filter(id => !(id in pictureCache)).forEach(id => {
+            pictureCache[id] = '';
+            callServer('getPicture', id)
+              .then(dataUrl => pictureCache[id] = dataUrl)
+              .catch(err => {
+                delete pictureCache[id];
+                showError(err);
+              });
+          });
+        }
+
+        async function openPerson(person) {
+          currentId.value = person.id;
+          visits.value = [];
+          loadingVisits.value = true;
+          show('person');
+          loadPictures(person.pictures);
+          try {
+            const result = await callServer('getPerson', person.id);
+            if (currentId.value !== person.id) return;
+            upsertPerson(result.person);
+            visits.value = result.visits;
+            loadPictures(result.person.pictures);
+          } catch (err) {
+            showError(err);
+          } finally {
+            loadingVisits.value = false;
+          }
+        }
+
+        function timesSummary(times) {
+          return days
+            .map(day => ({ day, periods: periods.filter(period => times.includes(`${day} ${period}`)) }))
+            .filter(entry => entry.periods.length)
+            .map(entry => `${entry.day}: ${entry.periods.length === periods.length ? 'Any time' : entry.periods.join(', ')}`);
+        }
+
+        function openLightbox(ids, index) {
+          lightbox.value = { ids, index };
+        }
+
+        function stepLightbox(step) {
+          const box = lightbox.value;
+          box.index = (box.index + step + box.ids.length) % box.ids.length;
+        }
+
+        const miniMapEl = ref(null);
+        let miniMap = null;
+        function syncMiniMap() {
+          if (miniMap) {
+            miniMap.remove();
+            miniMap = null;
+          }
+          const coords = view.value === 'person' && current.value && parseCoords(current.value.coordinates);
+          if (!coords || !miniMapEl.value || !window.L) return;
+          miniMap = L.map(miniMapEl.value, {
+            zoomControl: false, dragging: false, touchZoom: false, scrollWheelZoom: false,
+            doubleClickZoom: false, boxZoom: false, keyboard: false
+          }).setView(coords, 16);
+          addTiles(miniMap);
+          L.marker(coords).addTo(miniMap);
+        }
+        watch(() => [view.value, current.value && current.value.coordinates], () => nextTick(syncMiniMap));
+
+        /* -- Add / edit person ------------------------------------------ */
+
+        const form = reactive({});
+        let formSnapshot = '';
+        const processingPictures = ref(false);
+
+        function formState() {
+          return JSON.stringify({ ...form, newPictures: form.newPictures.length });
+        }
+
+        function fillForm(person) {
+          Object.assign(form, {
+            id: person ? person.id : '',
+            name: person ? person.name : '',
+            address: person ? person.address : '',
+            coordinates: person ? person.coordinates : '',
+            description: person ? person.description : '',
+            isStudy: person ? person.isStudy : false,
+            availableTimes: person ? person.availableTimes.slice() : [],
+            pictures: person ? person.pictures.slice() : [],
+            newPictures: [],
+            returnAt: person ? toLocalInput(person.returnAt) : ''
+          });
+          formSnapshot = formState();
+          closePicker();
+        }
+
+        function newPerson() {
+          fillForm(null);
+          show('editPerson');
+        }
+
+        function editPerson() {
+          fillForm(current.value);
+          loadPictures(form.pictures);
+          show('editPerson');
+        }
+
+        function toggleRow(day) {
+          toggleTimes(periods.map(period => `${day} ${period}`));
+        }
+
+        function toggleColumn(period) {
+          toggleTimes(days.map(day => `${day} ${period}`));
+        }
+
+        function toggleTimes(times) {
+          const allOn = times.every(time => form.availableTimes.includes(time));
+          const others = form.availableTimes.filter(time => !times.includes(time));
+          form.availableTimes = allOn ? others : others.concat(times);
+        }
+
+        async function addPictureFiles(event) {
+          const files = Array.from(event.target.files || []);
+          event.target.value = '';
+          processingPictures.value = true;
+          try {
+            for (const file of files) {
+              try {
+                const picture = await shrinkImage(file, maxPictureBytes);
+                form.newPictures.push({ key: Math.random().toString(36).slice(2), ...picture });
+              } catch (err) {
+                showError(err);
+              }
+            }
+          } finally {
+            processingPictures.value = false;
+          }
+        }
+
+        async function savePersonForm() {
+          if (!form.name.trim()) {
+            showToast('Name is required.', true);
+            return;
+          }
+          const isNew = !form.id;
+          await run('Saving…', async () => {
+            let person = await callServer('savePerson', {
+              id: form.id,
+              name: form.name,
+              address: form.address,
+              coordinates: form.coordinates,
+              description: form.description,
+              isStudy: form.isStudy,
+              availableTimes: form.availableTimes,
+              pictures: form.pictures,
+              returnAt: fromLocalInput(form.returnAt)
+            });
+            // Remember what's saved so a failed upload can be retried without
+            // creating the person twice.
+            form.id = person.id;
+            upsertPerson(person);
+
+            const total = form.newPictures.length;
+            while (form.newPictures.length) {
+              busy.value = `Uploading picture ${total - form.newPictures.length + 1} of ${total}…`;
+              const picture = form.newPictures[0];
+              person = await callServer('addPicture', person.id, picture.dataUrl);
+              pictureCache[person.pictures[person.pictures.length - 1]] = picture.dataUrl;
+              form.pictures = person.pictures.slice();
+              form.newPictures.shift();
+              upsertPerson(person);
+            }
+
+            formSnapshot = formState();
+            if (currentId.value !== person.id) {
+              currentId.value = person.id;
+              visits.value = [];
+              loadingVisits.value = false;
+            }
+            show('person');
+            showToast(isNew ? `Added ${person.name}.` : 'Saved.');
+          }).catch(() => {});
+        }
+
+        async function removePerson() {
+          if (!confirm(`Delete ${form.name} along with all of their visits and pictures? This can't be undone.`)) return;
+          const id = form.id;
+          await run('Deleting…', () => callServer('deletePerson', id)).then(() => {
+            people.value = people.value.filter(person => person.id !== id);
+            show('list');
+            showToast('Deleted.');
+          }).catch(() => {});
+        }
+
+        /* -- Map picker ------------------------------------------------- */
+
+        const pickerOpen = ref(false);
+        const pickerEl = ref(null);
+        const locating = ref(false);
+        let pickerMap = null;
+        let pickerMarker = null;
+
+        // Without coordinates, the map starts near the most recently added
+        // person who has some.
+        function defaultCenter() {
+          const recent = people.value
+            .filter(person => parseCoords(person.coordinates))
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+          return recent ? parseCoords(recent.coordinates) : null;
+        }
+
+        function openPicker() {
+          if (pickerOpen.value) return;
+          pickerOpen.value = true;
+          nextTick(() => {
+            if (!pickerEl.value || !window.L) return;
+            const coords = parseCoords(form.coordinates);
+            const center = coords || defaultCenter();
+            pickerMap = L.map(pickerEl.value).setView(center || [20, 0], coords ? 17 : center ? 14 : 2);
+            addTiles(pickerMap);
+            if (coords) placeMarker(coords);
+            pickerMap.on('click', event => setCoordsFromMap(event.latlng));
+          });
+        }
+
+        function closePicker() {
+          if (pickerMap) pickerMap.remove();
+          pickerMap = pickerMarker = null;
+          pickerOpen.value = false;
+        }
+
+        function togglePicker() {
+          pickerOpen.value ? closePicker() : openPicker();
+        }
+
+        function placeMarker(latlng) {
+          if (!pickerMap) return;
+          if (pickerMarker) {
+            pickerMarker.setLatLng(latlng);
+          } else {
+            pickerMarker = L.marker(latlng, { draggable: true }).addTo(pickerMap);
+            pickerMarker.on('dragend', () => setCoordsFromMap(pickerMarker.getLatLng()));
+          }
+        }
+
+        function setCoordsFromMap(latlng) {
+          form.coordinates = formatCoords(latlng.lat, latlng.lng);
+        }
+
+        watch(() => form.coordinates, value => {
+          const coords = parseCoords(value);
+          if (coords) placeMarker(coords);
+        });
+
+        function useMyLocation() {
+          if (!navigator.geolocation) {
+            showToast('Location isn’t available in this browser. Tap the map to drop a pin instead.', true);
+            openPicker();
+            return;
+          }
+          locating.value = true;
+          navigator.geolocation.getCurrentPosition(position => {
+            locating.value = false;
+            const { latitude, longitude } = position.coords;
+            form.coordinates = formatCoords(latitude, longitude);
+            if (pickerMap) {
+              pickerMap.setView([latitude, longitude], 17);
+            } else {
+              openPicker();
+            }
+          }, err => {
+            locating.value = false;
+            showToast(`Couldn’t get your location (${err.message || 'permission denied'}). Tap the map to drop a pin instead.`, true);
+            openPicker();
+          }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+        }
+
+        /* -- Add / edit visit ------------------------------------------- */
+
+        const visitForm = reactive({});
+        const hasVisitDraft = ref(false);
+        const draftKey = personId => `rv-notes/visitDraft/${personId}`;
+
+        function startVisit() {
+          const person = current.value;
+          const draft = storage.get(draftKey(person.id));
+          const futureReturn = person.returnAt && new Date(person.returnAt) > new Date() ? person.returnAt : '';
+          Object.assign(visitForm, {
+            id: '',
+            personId: person.id,
+            createdAt: toLocalInput(new Date().toISOString()),
+            notes: '',
+            returnAt: toLocalInput(futureReturn),
+            updateReturnAt: true
+          }, draft || {});
+          hasVisitDraft.value = !!draft;
+          show('visit');
+        }
+
+        function editVisit(visit) {
+          Object.assign(visitForm, {
+            id: visit.id,
+            personId: visit.personId,
+            createdAt: toLocalInput(visit.createdAt),
+            notes: visit.notes,
+            returnAt: '',
+            updateReturnAt: false
+          });
+          hasVisitDraft.value = false;
+          show('visit');
+        }
+
+        watch(visitForm, () => {
+          if (view.value !== 'visit' || visitForm.id) return;
+          // Nothing is kept until there are notes, so opening the form and
+          // backing out doesn't leave a stale start time behind.
+          if (!visitForm.notes.trim()) {
+            storage.remove(draftKey(visitForm.personId));
+            hasVisitDraft.value = false;
+            return;
+          }
+          storage.set(draftKey(visitForm.personId), {
+            createdAt: visitForm.createdAt,
+            notes: visitForm.notes,
+            returnAt: visitForm.returnAt
+          });
+          hasVisitDraft.value = true;
+        }, { deep: true });
+
+        function discardVisitDraft() {
+          if (!confirm('Discard this draft?')) return;
+          storage.remove(draftKey(visitForm.personId));
+          hasVisitDraft.value = false;
+          show('person');
+        }
+
+        function setReturnInWeeks(weeks) {
+          const start = new Date(visitForm.createdAt || Date.now());
+          start.setDate(start.getDate() + weeks * 7);
+          visitForm.returnAt = toLocalInput(start.toISOString());
+        }
+
+        async function saveVisitForm() {
+          const isNew = !visitForm.id;
+          await run('Saving…', () => callServer('saveVisit', {
+            id: visitForm.id,
+            personId: visitForm.personId,
+            createdAt: fromLocalInput(visitForm.createdAt),
+            notes: visitForm.notes,
+            returnAt: fromLocalInput(visitForm.returnAt),
+            updateReturnAt: visitForm.updateReturnAt
+          })).then(result => {
+            if (isNew) storage.remove(draftKey(visitForm.personId));
+            const others = visits.value.filter(visit => visit.id !== result.visit.id);
+            visits.value = others.concat(result.visit).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+            upsertPerson({
+              ...result.person,
+              visitCount: visits.value.length,
+              lastVisitAt: visits.value[0].createdAt
+            });
+            show('person');
+            showToast(isNew ? 'Visit saved.' : 'Saved.');
+          }).catch(() => {});
+        }
+
+        async function removeVisit() {
+          if (!confirm('Delete this visit? This can’t be undone.')) return;
+          const id = visitForm.id;
+          await run('Deleting…', () => callServer('deleteVisit', id)).then(() => {
+            visits.value = visits.value.filter(visit => visit.id !== id);
+            upsertPerson({
+              id: currentId.value,
+              visitCount: visits.value.length,
+              lastVisitAt: visits.value.length ? visits.value[0].createdAt : ''
+            });
+            show('person');
+            showToast('Visit deleted.');
+          }).catch(() => {});
+        }
+
+        /* -- Navigation ------------------------------------------------- */
+
+        const title = computed(() => {
+          if (view.value === 'person') return current.value ? current.value.name : '';
+          if (view.value === 'editPerson') return form.id ? `Edit ${current.value ? current.value.name : ''}` : 'New RV';
+          if (view.value === 'visit') return visitForm.id ? 'Edit Visit' : 'New Visit';
+          return 'RV Notes';
+        });
+
+        const subtitle = computed(() => {
+          if (busy.value) return busy.value;
+          if (view.value === 'visit' && current.value) return current.value.name;
+          return '';
+        });
+
+        function goBack() {
+          if (view.value === 'editPerson') {
+            if (formState() !== formSnapshot && !confirm('Discard your changes?')) return;
+            closePicker();
+            show(form.id && current.value && current.value.id === form.id ? 'person' : 'list');
+          } else if (view.value === 'visit') {
+            show('person');
+          } else {
+            show('list');
+          }
+        }
+
+        return {
+          days, periods, maxPictureBytes, view, busy, toast, people, search, filter, filters,
+          filteredPeople, current, visits, loadingVisits, pictureCache, lightbox, title, subtitle,
+          form, processingPictures, pickerOpen, pickerEl, miniMapEl, locating, visitForm, hasVisitDraft,
+          refresh, openPerson, newPerson, editPerson, goBack, toggleTimes, toggleRow, toggleColumn, addPictureFiles,
+          savePersonForm, removePerson, togglePicker, useMyLocation, startVisit, editVisit,
+          saveVisitForm, removeVisit, discardVisitDraft, setReturnInWeeks, openLightbox, stepLightbox,
+          markdown, formatDateTime, shortDate, relative, returnBadgeClass, firstLine, timesSummary,
+          mapQuery, mapsUrl, directionsUrl
+        };
+      }
+    });
+    app.component('md-editor', MdEditor);
+    app.mount('#app');
+  </script>
+</body>
+</html>
