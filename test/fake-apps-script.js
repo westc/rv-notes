@@ -1,6 +1,6 @@
 // A small in-memory stand-in for the Apps Script services Code.gs uses, so the
 // real backend can run in Node for tests and for trying the app locally.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
@@ -103,10 +103,16 @@ class FakeSheet {
 }
 
 /**
- * @returns {{context: Object, spreadsheet: Object, properties: Map}} context
- *     holds Code.gs's globals, such as doPost.
+ * @param {Object} options
+ * @param {function(string): {status: number, body: string}=} options.fetch
+ *     Answers UrlFetchApp.fetch, for testing Loader.gs.
+ * @returns {{context: Object, spreadsheet: Object, properties: Map,
+ *     cache: Map, fetches: string[]}} context holds the script's globals, such
+ *     as doPost.
  */
-export function loadBackend({ codePath = new URL('../apps-script/Code.gs', import.meta.url), apiKey = 'test-key' } = {}) {
+export function loadBackend({
+  codePath = new URL('../apps-script/Code.gs', import.meta.url), apiKey = 'test-key', fetch = null
+} = {}) {
   const sheets = new Map();
   const spreadsheet = {
     getName: () => 'Test RVs',
@@ -119,6 +125,8 @@ export function loadBackend({ codePath = new URL('../apps-script/Code.gs', impor
     sheets
   };
   const properties = new Map(apiKey ? [['apiKey', apiKey]] : []);
+  const cache = new Map();
+  const fetches = [];
 
   const context = {
     console,
@@ -129,11 +137,29 @@ export function loadBackend({ codePath = new URL('../apps-script/Code.gs', impor
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: key => properties.has(key) ? properties.get(key) : null,
-        setProperty: (key, value) => properties.set(key, String(value))
+        setProperty: (key, value) => properties.set(key, String(value)),
+        setProperties: values => Object.entries(values).forEach(([key, value]) => properties.set(key, String(value))),
+        deleteProperty: key => properties.delete(key)
+      })
+    },
+    CacheService: {
+      getScriptCache: () => ({
+        get: key => {
+          const item = cache.get(key);
+          return item && item.expires > Date.now() ? item.value : null;
+        },
+        putAll: (values, seconds) => Object.entries(values).forEach(([key, value]) =>
+          cache.set(key, { value: String(value), expires: Date.now() + seconds * 1000 }))
       })
     },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
-    Utilities: { getUuid: () => randomUUID() },
+    Utilities: {
+      getUuid: () => randomUUID(),
+      DigestAlgorithm: { SHA_256: 'sha256' },
+      Charset: { UTF_8: 'utf8' },
+      // Like Apps Script, returns signed bytes.
+      computeDigest: (algorithm, text) => [...createHash(algorithm).update(text, 'utf8').digest()].map(b => b > 127 ? b - 256 : b)
+    },
     ContentService: {
       MimeType: { JSON: 'application/json' },
       createTextOutput: text => ({ setMimeType() { return this; }, getContent: () => text })
@@ -150,12 +176,25 @@ export function loadBackend({ codePath = new URL('../apps-script/Code.gs', impor
       })
     },
     UrlFetchApp: {
-      fetch: () => ({ getHeaders: () => ({}) })
+      fetch: url => {
+        fetches.push(url);
+        if (!fetch) return { getHeaders: () => ({}) };
+        const { status, body } = fetch(url);
+        return { getHeaders: () => ({}), getResponseCode: () => status, getContentText: () => body };
+      }
     }
   };
   vm.createContext(context);
   vm.runInContext(readFileSync(codePath, 'utf8'), context, { filename: 'Code.gs' });
-  return { context, spreadsheet, properties };
+  return { context, spreadsheet, properties, cache, fetches };
+}
+
+/**
+ * Starts a new "execution": Apps Script doesn't keep globals between
+ * requests, so neither should tests of Loader.gs.
+ */
+export function newExecution(backend) {
+  vm.runInContext('backend = null;', backend.context);
 }
 
 /**

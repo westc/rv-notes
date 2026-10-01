@@ -20,7 +20,7 @@ kept in a Google Sheet you own.
 | Part | Where it lives | What it does |
 | --- | --- | --- |
 | The app (`index.html`, `js/`, `styles.css`, `sw.js`, …) | GitHub Pages: https://westc.github.io/rv-notes/ | The screens you use. It's a Progressive Web App, so it can be added to your home screen and opened without internet. One copy serves everyone. |
-| The backend (`apps-script/Code.gs`) | An Apps Script attached to each person's spreadsheet | Saves and reads the spreadsheet. It only answers requests that include the spreadsheet's secret key. |
+| The backend (`apps-script/Code.gs`) | Served from GitHub Pages, run by a small loader (`apps-script/Loader.gs`) attached to each person's spreadsheet | Saves and reads the spreadsheet. It only answers requests that include the spreadsheet's secret key. The loader downloads the latest backend, so updates reach every spreadsheet on their own. |
 | The data | The Google Sheet | One row per person, visit, picture, time entry, study, and monthly report. |
 
 GitHub only hosts the app's files. Your notes go straight from your phone to your
@@ -32,8 +32,10 @@ Each person who wants their own RV list does this once.
 
 1. Create a new Google Sheet, for example **Chris' RVs**.
 2. Open **Extensions → Apps Script**.
-3. Replace the contents of `Code.gs` with [`apps-script/Code.gs`](apps-script/Code.gs).
-   You don't need any HTML files.
+3. Replace the contents of `Code.gs` with [`apps-script/Loader.gs`](apps-script/Loader.gs).
+   You don't need any HTML files. The loader downloads the actual backend
+   ([`apps-script/Code.gs`](apps-script/Code.gs)) from the RV Notes site, so you never
+   have to paste it again when RV Notes is updated.
 4. Click **Deploy → New deployment**, choose **Web app**, and set:
    - **Execute as:** Me
    - **Who has access:** Anyone
@@ -80,6 +82,13 @@ anywhere else and only lets the app talk to Google Apps Script and the OpenStree
 server. Turn on two-factor authentication for the GitHub account that hosts the app, since
 whoever controls the repository controls the app's code.
 
+The same goes for the backend: the loader runs whatever `apps-script/Code.gs` the site
+serves. That code is limited to the permissions approved for the loader (this spreadsheet,
+dialogs in it, and internet requests), so it can't open anyone's other files, email, or
+account. It could read and change the spreadsheet's RV notes, which the app's code can
+already do with the key. If you'd rather review every update yourself, paste
+`apps-script/Code.gs` instead of the loader and update it by hand.
+
 ### Permissions the script asks for
 
 - **See, edit, create, and delete this spreadsheet** (`@OnlyCurrentDoc` limits it to this
@@ -90,11 +99,21 @@ whoever controls the repository controls the app's code.
 - Address searches use Apps Script's built-in Maps service, which needs no API key. Free
   Google accounts can do about 1,000 searches a day.
 
-### Updating the script
+### Updates
 
-After pasting a new `Code.gs`, use **Deploy → Manage deployments → Edit (pencil) →
-Version: New version → Deploy** so the same URL serves the new code. The URL and key stay
-the same, so devices keep syncing.
+With the loader, there's nothing to do. Each spreadsheet downloads the new backend within
+about 20 minutes of it being published (the loader and GitHub Pages each keep a copy for
+10 minutes). **RV Notes → Update now** in the spreadsheet downloads it right away. If the
+site can't be reached, or a download looks wrong or doesn't compile, the last copy that
+worked keeps running.
+
+**Switching from a pasted `Code.gs` to the loader** (once): replace everything in `Code.gs`
+with `apps-script/Loader.gs`, then **Deploy → Manage deployments → Edit (pencil) →
+Version: New version → Deploy**. Approve the permissions if asked. The URL and key stay the
+same, so devices keep syncing.
+
+If you pasted `Code.gs` itself instead of the loader, paste the new one after each update
+and deploy a new version the same way.
 
 If the app is newer than a spreadsheet's script (for example, time and reports were added
 but the script wasn't updated yet), RVs and visits keep syncing. Time, studies, and reports
@@ -291,7 +310,7 @@ files, which are committed so GitHub Pages can serve the repository as is.
 
 ```sh
 npm install
-npm test           # runs Code.gs against fake Sheets in Node
+npm test           # runs Code.gs and Loader.gs against fake Sheets in Node
 npm run serve      # the app plus a fake backend on http://localhost:8787
 npm run build      # vendor libraries, icons, Tailwind CSS, and sw.js
 ```
@@ -312,4 +331,9 @@ request so you can try the app offline (`?on=0` to undo).
 The repository is served by GitHub Pages from the `main` branch's root. Pushing to `main`
 publishes the app, and devices offer to reload the next time they open it.
 
-If you host it somewhere else, update `APP_URL` at the top of `apps-script/Code.gs`.
+Pushing also updates every spreadsheet's backend through the loader, so make sure
+`npm test` passes first. The app handles a backend that's up to about 20 minutes behind it
+(changes for tables the backend doesn't know yet wait on the device).
+
+If you host it somewhere else, update `APP_URL` at the top of `apps-script/Code.gs` and
+`RV_NOTES_CODE_URL` at the top of `apps-script/Loader.gs`.
