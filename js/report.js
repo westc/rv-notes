@@ -145,3 +145,53 @@ export function reportMonths(data) {
   data.reports.forEach(report => months.add(report.month));
   return [...months].sort().reverse();
 }
+
+/** "1:35" for 95 minutes, as shown on the calendar. */
+export function clockMinutes(minutes) {
+  return `${Math.floor(minutes / 60)}:${pad(minutes % 60)}`;
+}
+
+/**
+ * The first day of the week for the browser's language, 0 for Sunday to 6
+ * for Saturday. Falls back to Sunday where browsers can't tell.
+ */
+export function weekStart(language = typeof navigator === 'undefined' ? 'en-US' : navigator.language) {
+  try {
+    const locale = new Intl.Locale(language);
+    const info = locale.getWeekInfo ? locale.getWeekInfo() : locale.weekInfo;
+    return info && info.firstDay ? info.firstDay % 7 : 0;
+  } catch (err) {
+    return 0;
+  }
+}
+
+/** Narrow weekday names in calendar order, such as ["S", "M", …]. */
+export function weekdayLabels(start = 0) {
+  // January 1, 2023 was a Sunday.
+  return Array.from({ length: 7 }, (_, i) =>
+    new Date(2023, 0, 1 + (start + i) % 7).toLocaleDateString(undefined, { weekday: 'narrow' }));
+}
+
+/**
+ * The month as calendar cells, starting on the given weekday. Cells outside
+ * the month are null. Each day has its ministry and credit minutes.
+ *
+ * @returns {?{day: string, date: number, minutes: number, creditMinutes: number}[]}
+ */
+export function calendarCells(time, month, start = 0) {
+  const [year, m] = month.split('-').map(Number);
+  const first = new Date(year, m - 1, 1);
+  const days = new Date(year, m, 0).getDate();
+  const totals = {};
+  time.filter(entry => entry.date.slice(0, 7) === month).forEach(entry => {
+    const total = totals[entry.date] || (totals[entry.date] = { minutes: 0, creditMinutes: 0 });
+    total[entry.kind === 'credit' ? 'creditMinutes' : 'minutes'] += entry.minutes;
+  });
+  const cells = Array((first.getDay() - start + 7) % 7).fill(null);
+  for (let date = 1; date <= days; date++) {
+    const day = `${month}-${pad(date)}`;
+    cells.push({ day, date, minutes: 0, creditMinutes: 0, ...totals[day] });
+  }
+  while (cells.length % 7) cells.push(null);
+  return cells;
+}

@@ -119,9 +119,12 @@ soon as it is.
 - **Updates.** When a new version of the app is published, a **Reload** banner appears.
 - **Monthly report.** Tap the clipboard icon at the top of the list. Pick the month with the arrows,
   or tap one under **Months** (a check mark means it was sent).
-  - **Time.** **Add time** logs a date, hours and minutes, ministry or credit time, and
+  - **Calendar.** Each day shows its time (green for ministry, blue for credit; a dot means
+    both). Tap a day to see its entries, then **Add** to log time on that day. Tap an
+    entry to change or delete it.
+  - **Time.** **Add** logs a date, hours and minutes, ministry or credit time, and
     an optional note. **Start timer** keeps running even if you close the app. **Stop**
-    fills in the time for you to save. Tap an entry to change or delete it.
+    fills in the time for you to save.
   - **Hours** are whole hours. Leftover minutes carry into the next month, and the screen
     shows how many came in and how many carry forward. Credit hours are counted and
     carried separately.

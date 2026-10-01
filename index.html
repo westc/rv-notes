@@ -508,21 +508,63 @@
             <p v-if="summary.credit.liveCarriedOut">{{ summary.credit.liveCarriedOut }} min carry forward</p>
           </div>
         </div>
+        <div class="border-t border-slate-200 pt-3 dark:border-slate-700">
+          <div class="grid grid-cols-7 pb-1 text-center text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span v-for="(label, i) in weekdays" :key="i">{{ label }}</span>
+          </div>
+          <div class="grid grid-cols-7 gap-1">
+            <template v-for="(cell, i) in calendar" :key="i">
+              <span v-if="!cell"></span>
+              <button v-else type="button" @click="selectedDay = cell.day" :disabled="cell.day > today"
+                :aria-label="dayLabel(cell.day) + (cell.minutes ? ', ' + formatMinutes(cell.minutes) : '') + (cell.creditMinutes ? ', ' + formatMinutes(cell.creditMinutes) + ' credit' : '')"
+                :aria-pressed="cell.day === selectedDay"
+                class="relative flex h-12 flex-col items-center justify-center rounded-lg text-sm leading-tight disabled:opacity-30"
+                :class="[
+                  cell.day === selectedDay ? 'ring-2 ring-indigo-500' : '',
+                  cell.minutes ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-50' : cell.creditMinutes ? 'bg-sky-100 text-sky-900 dark:bg-sky-900 dark:text-sky-50' : 'active:bg-slate-100 dark:active:bg-slate-700'
+                ]">
+                <span :class="cell.day === today ? 'font-bold text-indigo-600 dark:text-indigo-300' : ''">{{ cell.date }}</span>
+                <span v-if="cell.minutes || cell.creditMinutes" class="text-[11px] font-semibold tabular-nums">{{ clockMinutes(cell.minutes || cell.creditMinutes) }}</span>
+                <span v-if="cell.minutes && cell.creditMinutes" class="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-sky-500" aria-hidden="true"></span>
+              </button>
+            </template>
+          </div>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            <span class="inline-block h-2 w-2 rounded-sm bg-emerald-400"></span> Ministry
+            <span class="ml-2 inline-block h-2 w-2 rounded-sm bg-sky-400"></span> Credit
+          </p>
+        </div>
+
+        <div v-if="selectedDay" class="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <h4 class="font-medium">{{ dayLabel(selectedDay) }}</h4>
+              <p v-if="selectedDayEntries.length" class="text-xs text-slate-500 dark:text-slate-400">
+                {{ formatMinutes(selectedDayEntries.reduce((sum, entry) => sum + entry.minutes, 0)) }}
+              </p>
+            </div>
+            <button class="btn shrink-0" @click="newTimeEntry()" :aria-label="'Add time on ' + dayLabel(selectedDay)">
+              <i class="bi bi-plus-lg"></i> Add
+            </button>
+          </div>
+          <ul v-if="selectedDayEntries.length" class="divide-y divide-slate-200 dark:divide-slate-700">
+            <li v-for="entry in selectedDayEntries" :key="entry.id">
+              <button class="flex w-full items-center gap-3 py-2 text-left" @click="editTimeEntry(entry)">
+                <span class="min-w-0 flex-1 truncate text-sm" :class="entry.note ? '' : 'text-slate-400'">{{ entry.note || 'No note' }}</span>
+                <span v-if="entry.kind === 'credit'" class="badge badge-later shrink-0">Credit</span>
+                <span class="shrink-0 text-sm font-medium tabular-nums">{{ formatMinutes(entry.minutes) }}</span>
+                <i class="bi bi-chevron-right text-xs text-slate-400"></i>
+              </button>
+            </li>
+          </ul>
+          <p v-else class="text-sm text-slate-500 dark:text-slate-400">No time logged.</p>
+        </div>
+
         <div class="flex gap-2">
-          <button class="btn flex-1" @click="newTimeEntry"><i class="bi bi-plus-lg"></i> Add time</button>
+          <button v-if="!selectedDay" class="btn flex-1" @click="newTimeEntry()"><i class="bi bi-plus-lg"></i> Add time</button>
           <button v-if="!timer" class="btn flex-1" @click="startTimer"><i class="bi bi-stopwatch"></i> Start timer</button>
           <button v-else class="btn flex-1" @click="stopTimer"><i class="bi bi-stop-fill"></i> Stop {{ timerElapsed }}</button>
         </div>
-        <ul v-if="summary.entries.length" class="divide-y divide-slate-200 dark:divide-slate-700">
-          <li v-for="entry in summary.entries" :key="entry.id">
-            <button class="flex w-full items-center gap-3 py-2 text-left" @click="editTimeEntry(entry)">
-              <span class="w-20 shrink-0 text-sm text-slate-500 dark:text-slate-400">{{ shortDate(entry.date + 'T12:00:00') }}</span>
-              <span class="min-w-0 flex-1 truncate text-sm">{{ entry.note }}</span>
-              <span v-if="entry.kind === 'credit'" class="badge badge-later shrink-0">Credit</span>
-              <span class="shrink-0 text-sm font-medium tabular-nums">{{ formatMinutes(entry.minutes) }}</span>
-            </button>
-          </li>
-        </ul>
       </section>
 
       <section class="card space-y-3 p-4">

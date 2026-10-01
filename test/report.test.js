@@ -84,3 +84,19 @@ test('report text', () => {
   ].join('\n'));
   assert.ok(!reportText(summarize(empty, '2026-10')).includes('Credit'));
 });
+
+test('calendar cells line up with weekdays and add up each day', async () => {
+  const { calendarCells, clockMinutes } = await import('../js/report.js');
+  const time = [entry('2026-10-05', 30), entry('2026-10-05', 65), entry('2026-10-05', 60, 'credit'), entry('2026-11-01', 10)];
+  // October 1, 2026 is a Thursday.
+  const sunday = calendarCells(time, '2026-10', 0);
+  assert.equal(sunday.findIndex(Boolean), 4);
+  assert.equal(sunday.length % 7, 0);
+  const monday = calendarCells(time, '2026-10', 1);
+  assert.equal(monday.findIndex(Boolean), 3);
+  const fifth = sunday.find(cell => cell && cell.day === '2026-10-05');
+  assert.deepEqual([fifth.minutes, fifth.creditMinutes], [95, 60]);
+  assert.equal(sunday.filter(Boolean).length, 31);
+  assert.equal(clockMinutes(95), '1:35');
+  assert.equal(clockMinutes(5), '0:05');
+});

@@ -3,7 +3,8 @@ import * as L from '../vendor/leaflet/leaflet-src.esm.js';
 import { callApi } from './api.js';
 import { createStore } from './store.js';
 import {
-  addMonths, dayKey, formatMinutes, monthKey, monthLabel, reportId, reportMonths, reportText, summarize, uniqueStudies
+  addMonths, calendarCells, clockMinutes, dayKey, formatMinutes, monthKey, monthLabel, reportId, reportMonths,
+  reportText, summarize, uniqueStudies, weekStart, weekdayLabels
 } from './report.js';
 import { startScanner } from './scanner.js';
 import {
@@ -818,6 +819,26 @@ const app = createApp({
     const reportComments = ref('');
     watch(() => [reportMonth.value, summary.value.comments], () => reportComments.value = summary.value.comments, { immediate: true });
 
+    /* Calendar */
+
+    const firstWeekday = weekStart();
+    const weekdays = weekdayLabels(firstWeekday);
+    const today = computed(() => dayKey(now.value));
+    const calendar = computed(() => calendarCells(store.state.time, reportMonth.value, firstWeekday));
+    // The day whose time is listed under the calendar. It starts on today in
+    // the current month and the first day with time in other months.
+    const selectedDay = ref('');
+    watch(reportMonth, month => {
+      if (selectedDay.value.startsWith(month)) return;
+      const withTime = calendar.value.find(cell => cell && (cell.minutes || cell.creditMinutes));
+      selectedDay.value = month === monthKey() ? dayKey() : withTime ? withTime.day : '';
+    }, { immediate: true });
+    const selectedDayEntries = computed(() => summary.value.entries.filter(entry => entry.date === selectedDay.value));
+
+    function dayLabel(day) {
+      return new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+    }
+
     function openReport(month = monthKey()) {
       reportMonth.value = month;
       show('report');
@@ -993,9 +1014,9 @@ const app = createApp({
       fillTimeForm({ date: dayKey(start), hours: Math.floor(minutes / 60), minutes: minutes % 60, fromTimer: true });
     }
 
-    function newTimeEntry() {
+    function newTimeEntry(day = selectedDay.value) {
       const month = reportMonth.value;
-      fillTimeForm({ date: month === monthKey() ? dayKey() : `${month}-01` });
+      fillTimeForm({ date: day || (month === monthKey() ? dayKey() : `${month}-01`) });
     }
 
     function editTimeEntry(entry) {
@@ -1029,6 +1050,7 @@ const app = createApp({
           storage.remove(timerKey());
         }
         reportMonth.value = timeForm.date.slice(0, 7);
+        selectedDay.value = timeForm.date;
         show('report');
         showToast(`Saved ${formatMinutes(minutes)}.`);
       } catch (err) {
@@ -1185,6 +1207,7 @@ const app = createApp({
       openReport, stepMonth, setShared, saveComments, saveReportName, sendReport,
       studyName, studyPersonId, studyCandidates, studySuggestions, studyDisplayName, addStudyPerson, addStudyName, removeStudy,
       personStudyMonth, personStudyCounted, togglePersonStudy,
+      weekdays, today, calendar, selectedDay, selectedDayEntries, dayLabel, clockMinutes,
       timer, timerElapsed, startTimer, stopTimer, timeForm, newTimeEntry, editTimeEntry, setDuration, saveTimeForm, removeTimeEntry,
       scanner, scannerVideo, openScanner, closeScanner
     };
