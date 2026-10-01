@@ -1,0 +1,23 @@
+{
+  "name": "rv-notes",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run vendor && npm run icons && npm run css && npm run stamp",
+    "vendor": "node scripts/vendor.js",
+    "icons": "node scripts/icons.js",
+    "css": "tailwindcss -i src/styles.css -o styles.css --minify",
+    "stamp": "node scripts/stamp-sw.js",
+    "test": "node --test test/*.test.js",
+    "serve": "node test/server.js"
+  },
+  "devDependencies": {
+    "@tailwindcss/typography": "0.5.20",
+    "bootstrap-icons": "1.13.1",
+    "dompurify": "3.4.16",
+    "leaflet": "1.9.4",
+    "marked": "18.0.14",
+    "tailwindcss": "3.4.19",
+    "vue": "3.5.43"
+  }
+}

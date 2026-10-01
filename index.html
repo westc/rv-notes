@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <!--
+    Scripts only load from this site. Vue compiles the templates below in the
+    browser, which needs 'unsafe-eval'. Data only goes to Google Apps Script,
+    and map tiles come from OpenStreetMap.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; font-src 'self'; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://tile.openstreetmap.org; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>RV Notes</title>
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="RV Notes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+  <div id="app" v-cloak class="min-h-screen pb-10">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+      <div class="mx-auto flex h-14 max-w-xl items-center gap-1 px-2">
+        <button v-if="canGoBack" class="icon-btn" @click="goBack" :disabled="!!busy" aria-label="Back">
+          <i class="bi bi-chevron-left"></i>
+        </button>
+        <div class="min-w-0 flex-1 px-1">
+          <button v-if="view === 'list'" class="flex max-w-full items-center gap-1 text-left" @click="openConnections" aria-label="Switch spreadsheet">
+            <h1 class="truncate text-lg font-semibold leading-tight">{{ title }}</h1>
+            <i class="bi bi-chevron-down shrink-0 text-xs text-slate-500 dark:text-slate-400"></i>
+          </button>
+          <h1 v-else class="truncate text-lg font-semibold leading-tight">{{ title }}</h1>
+          <p v-if="subtitle" class="truncate text-xs" :class="subtitleClass">{{ subtitle }}</p>
+        </div>
+        <template v-if="view === 'list'">
+          <button class="icon-btn" :class="syncIcon.color" @click="syncNow" :aria-label="syncIcon.label">
+            <i class="bi" :class="syncIcon.icon"></i>
+          </button>
+          <button class="icon-btn text-indigo-600 dark:text-indigo-400" @click="newPerson" :disabled="!!busy" aria-label="Add RV">
+            <i class="bi bi-plus-circle-fill"></i>
+          </button>
+        </template>
+        <button v-else-if="view === 'person'" class="icon-btn" @click="editPerson" :disabled="!!busy" aria-label="Edit">
+          <i class="bi bi-pencil"></i>
+        </button>
+        <button v-else-if="view === 'connections'" class="icon-btn text-indigo-600 dark:text-indigo-400" @click="startAddConnection" aria-label="Add a spreadsheet">
+          <i class="bi bi-plus-circle-fill"></i>
+        </button>
+      </div>
+      <div v-if="busy" class="h-0.5 w-full overflow-hidden bg-indigo-100 dark:bg-indigo-950">
+        <div class="h-full w-1/3 animate-pulse bg-indigo-500"></div>
+      </div>
+    </header>
+
+    <!-- Notices -->
+    <div v-if="updateReady || (view === 'list' && (store.status === 'auth' || showInstallTip))" class="mx-auto max-w-xl space-y-2 px-3 pt-3">
+      <div v-if="updateReady" class="card flex items-center gap-3 p-3 text-sm">
+        <i class="bi bi-stars text-lg text-indigo-600 dark:text-indigo-400"></i>
+        <span class="flex-1">A new version of RV Notes is ready.</span>
+        <button class="btn" @click="applyUpdate">Reload</button>
+      </div>
+      <div v-if="view === 'list' && store.status === 'auth'" class="flex items-start gap-3 rounded-xl bg-red-50 p-3 text-sm text-red-800 ring-1 ring-red-200 dark:bg-red-950 dark:text-red-200 dark:ring-red-900">
+        <i class="bi bi-key text-lg"></i>
+        <div class="flex-1">
+          <p>{{ store.statusMessage }}</p>
+          <p class="mt-1 text-xs">Your changes are kept on this device until then.</p>
+        </div>
+        <button class="btn" @click="startAddConnection">Connect</button>
+      </div>
+      <div v-if="view === 'list' && showInstallTip" class="card flex items-start gap-3 p-3 text-sm">
+        <i class="bi bi-phone text-lg text-indigo-600 dark:text-indigo-400"></i>
+        <p class="flex-1">
+          To use RV Notes without internet, add it to your home screen:
+          <template v-if="isIos">tap <i class="bi bi-box-arrow-up"></i> <b>Share</b>, then <b>Add to Home Screen</b>.</template>
+          <template v-else>open your browser’s menu, then <b>Install app</b> or <b>Add to Home screen</b>.</template>
+        </p>
+        <button class="-m-1 p-1 text-slate-400" @click="dismissInstallTip" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+
+    <!-- Welcome -->
+    <main v-if="view === 'welcome'" class="mx-auto max-w-xl space-y-3 p-3">
+      <div class="card space-y-3 p-5">
+        <h2 class="text-lg font-semibold">Welcome to RV Notes</h2>
+        <p>Your return visit notes are kept in a Google Sheet you own, with a copy on this device so the app works without internet.</p>
+        <ol class="list-decimal space-y-1 pl-5 text-sm">
+          <li>Open your RV Notes spreadsheet on a computer.</li>
+          <li>Choose <b>RV Notes → Connect app</b>.</li>
+          <li>Scan the QR code with this device’s camera, or copy the link and paste it here.</li>
+        </ol>
+        <button class="btn-primary w-full" @click="startAddConnection"><i class="bi bi-link-45deg"></i> Paste a link</button>
+        <p class="text-xs text-slate-500 dark:text-slate-400">
+          Setting up a spreadsheet for the first time? Follow the
+          <a class="text-indigo-600 underline dark:text-indigo-400" href="https://github.com/westc/rv-notes#set-up-a-spreadsheet" target="_blank" rel="noopener">setup steps</a>.
+        </p>
+      </div>
+    </main>
+
+    <!-- Spreadsheets (connections) -->
+    <main v-else-if="view === 'connections'" class="mx-auto max-w-xl space-y-3 p-3">
+      <ul class="space-y-2">
+        <li v-for="c in store.connections" :key="c.id" class="card flex items-center gap-2 p-3">
+          <button class="min-w-0 flex-1 text-left" @click="switchConnection(c.id)">
+            <span class="flex items-center gap-2">
+              <span class="truncate font-semibold">{{ c.name }}</span>
+              <i v-if="store.active && c.id === store.active.id" class="bi bi-check-circle-fill text-indigo-600 dark:text-indigo-400" aria-label="Open"></i>
+            </span>
+            <span class="block text-xs text-slate-500 dark:text-slate-400">
+              {{ c.lastSyncAt ? 'Synced ' + relative(c.lastSyncAt, now) : 'Not synced yet' }}<template v-if="pendingCounts[c.id]"> &middot; {{ changesWaiting(pendingCounts[c.id]) }}</template>
+            </span>
+          </button>
+          <button class="icon-btn h-9 w-9 text-base" @click="renameConnection(c)" aria-label="Rename"><i class="bi bi-pencil"></i></button>
+          <button class="icon-btn h-9 w-9 text-base text-red-600 dark:text-red-400" @click="removeConnection(c)" aria-label="Remove from this device"><i class="bi bi-trash"></i></button>
+        </li>
+      </ul>
+      <button class="btn w-full" @click="startAddConnection"><i class="bi bi-plus-lg"></i> Add a spreadsheet</button>
+      <button v-if="store.active" class="btn w-full" @click="redownload" :disabled="!!busy || store.status === 'syncing'">
+        <i class="bi bi-cloud-download"></i> Download {{ store.active.name }} again
+      </button>
+      <p class="px-1 text-xs text-slate-500 dark:text-slate-400">
+        Each spreadsheet’s notes are kept separately on this device. Removing one only deletes this device’s copy. The spreadsheet isn’t changed.
+      </p>
+    </main>
+
+    <!-- Add a spreadsheet (connection) -->
+    <main v-else-if="view === 'addConnection'" class="mx-auto max-w-xl p-3">
+      <form class="space-y-4" @submit.prevent="saveConnectionForm">
+        <div class="card space-y-4 p-4">
+          <div>
+            <label class="label" for="connectLink">Link from the spreadsheet</label>
+            <textarea id="connectLink" v-model="connectForm.link" class="input font-mono text-xs" rows="3" required
+              autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…#connect=…"></textarea>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">In the spreadsheet on a computer, choose <b>RV Notes → Connect app</b>, then <b>Copy</b>.</p>
+            <p v-if="connectForm.link && !connectLink" class="mt-1 text-xs text-red-600 dark:text-red-400">This isn’t a Connect app link.</p>
+          </div>
+          <div>
+            <label class="label" for="connectName">Name on this device</label>
+            <input id="connectName" v-model="connectForm.name" class="input" required autocomplete="off" placeholder="For example, Chris’ RVs">
+          </div>
+          <div v-if="isIos && !isStandalone && connectLink" class="space-y-2 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-950 ring-1 ring-indigo-200 dark:bg-indigo-950 dark:text-indigo-100 dark:ring-indigo-800">
+            <p>On iPhone and iPad, the Home Screen app keeps its notes separate from Safari. To use RV Notes from your Home Screen:</p>
+            <ol class="list-decimal space-y-1 pl-5">
+              <li>Tap <b>Copy link</b>.</li>
+              <li>Tap <i class="bi bi-box-arrow-up"></i> <b>Share</b>, then <b>Add to Home Screen</b>.</li>
+              <li>Open RV Notes from your Home Screen, tap <b>Paste a link</b>, and paste.</li>
+            </ol>
+            <button type="button" class="btn w-full" @click="copyText(connectForm.link)"><i class="bi bi-clipboard"></i> Copy link</button>
+            <p class="text-xs">Or tap <b>Connect</b> below to use RV Notes in Safari.</p>
+          </div>
+          <p v-if="connectExisting" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+            This device is already connected to this spreadsheet as “{{ connectExisting.name }}”. Connecting updates its key and name, and keeps any changes that haven’t synced yet.
+          </p>
+        </div>
+        <button type="submit" class="btn-primary w-full" :disabled="!!busy || !connectLink">
+          <i class="bi bi-link-45deg"></i> Connect
+        </button>
+      </form>
+    </main>
+
+    <!-- List -->
+    <main v-else-if="view === 'list'" class="mx-auto max-w-xl space-y-3 p-3">
+      <div class="relative">
+        <i class="bi bi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+        <input v-model="search" type="search" class="input pl-9" placeholder="Search names, addresses, descriptions">
+      </div>
+      <div class="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
+        <button v-for="f in filters" :key="f.key" class="chip" :class="filter === f.key ? 'chip-on' : 'chip-off'" @click="filter = f.key">
+          {{ f.label }} <span class="opacity-70">{{ f.count }}</span>
+        </button>
+      </div>
+
+      <div v-if="!people.length && store.status === 'syncing' && !store.active.lastSyncAt" class="card p-6 text-center text-slate-500 dark:text-slate-400">
+        <i class="bi bi-cloud-download text-4xl"></i>
+        <p class="mt-2">Downloading your notes…</p>
+      </div>
+      <div v-else-if="!people.length" class="card p-6 text-center text-slate-500 dark:text-slate-400">
+        <i class="bi bi-journal-plus text-4xl"></i>
+        <p class="mt-2">No return visits yet.</p>
+        <button class="btn-primary mt-4" @click="newPerson"><i class="bi bi-plus-lg"></i> Add your first RV</button>
+      </div>
+      <p v-else-if="!filteredPeople.length" class="p-6 text-center text-slate-500 dark:text-slate-400">No one matches.</p>
+
+      <ul class="space-y-2">
+        <li v-for="person in filteredPeople" :key="person.id">
+          <button class="card flex w-full items-start gap-3 p-3 text-left active:bg-slate-50 dark:active:bg-slate-700" @click="openPerson(person)">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate font-semibold">{{ person.name }}</span>
+                <span v-if="person.isStudy" class="badge badge-study shrink-0"><i class="bi bi-book"></i> Study</span>
+              </div>
+              <p v-if="person.address" class="truncate text-sm text-slate-500 dark:text-slate-400">{{ firstLine(person.address) }}</p>
+              <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {{ person.lastVisitAt ? 'Last visit ' + relative(person.lastVisitAt, now) : 'No visits yet' }}
+                <template v-if="person.visitCount > 1"> &middot; {{ person.visitCount }} visits</template>
+              </p>
+            </div>
+            <span v-if="person.returnAt" class="badge shrink-0" :class="returnBadgeClass(person.returnAt)">
+              <i class="bi bi-calendar-event"></i> {{ shortDate(person.returnAt) }}
+            </span>
+          </button>
+        </li>
+      </ul>
+    </main>
+
+    <!-- Person -->
+    <main v-else-if="view === 'person' && current" class="mx-auto max-w-xl space-y-3 p-3">
+      <section class="card space-y-3 p-4">
+        <div v-if="current.isStudy || current.returnAt" class="flex flex-wrap gap-2">
+          <span v-if="current.isStudy" class="badge badge-study"><i class="bi bi-book"></i> Study</span>
+          <span v-if="current.returnAt" class="badge" :class="returnBadgeClass(current.returnAt)">
+            <i class="bi bi-calendar-event"></i> Return {{ formatDateTime(current.returnAt) }} ({{ relative(current.returnAt, now) }})
+          </span>
+        </div>
+
+        <p v-if="current.address" class="whitespace-pre-line">{{ current.address }}</p>
+        <div v-if="current.coordinates" ref="miniMapEl" class="z-0 h-40 overflow-hidden rounded-lg"></div>
+        <div v-if="mapQuery(current)" class="flex gap-2">
+          <a class="btn flex-1" :href="mapsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-geo-alt"></i> Open in Maps</a>
+          <a class="btn flex-1" :href="directionsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-sign-turn-right"></i> Directions</a>
+        </div>
+
+        <div v-if="current.availableTimes.length">
+          <h3 class="label">Available</h3>
+          <ul class="text-sm">
+            <li v-for="line in timesSummary(current.availableTimes)" :key="line">{{ line }}</li>
+          </ul>
+        </div>
+
+        <div v-if="current.description" class="prose prose-sm max-w-none dark:prose-invert" v-html="markdown(current.description)"></div>
+
+        <p v-if="!current.address && !current.coordinates && !current.description && !current.availableTimes.length" class="text-sm text-slate-500 dark:text-slate-400">
+          No details yet. Tap <i class="bi bi-pencil"></i> to add an address, location, or description.
+        </p>
+      </section>
+
+      <section v-if="current.pictures.length" class="grid grid-cols-3 gap-2">
+        <button v-for="(id, index) in current.pictures" :key="id" class="aspect-square overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700" @click="openLightbox(current.pictures, index)">
+          <img v-if="pictureCache[id]" :src="pictureCache[id]" class="h-full w-full object-cover" alt="">
+          <i v-else class="bi bi-image text-2xl text-slate-400"></i>
+        </button>
+      </section>
+
+      <button class="btn-primary w-full" @click="startVisit" :disabled="!!busy"><i class="bi bi-plus-lg"></i> Add Visit</button>
+
+      <section class="space-y-2">
+        <h2 class="section-title">Visits ({{ visits.length }})</h2>
+        <p v-if="!visits.length" class="p-4 text-center text-sm text-slate-500 dark:text-slate-400">No visits yet.</p>
+        <article v-for="visit in visits" :key="visit.id" class="card p-3">
+          <div class="flex items-start gap-2">
+            <div class="flex-1">
+              <p class="text-sm font-semibold">{{ formatDateTime(visit.createdAt) }}</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400">{{ relative(visit.createdAt, now) }}</p>
+            </div>
+            <button class="icon-btn -mr-1 -mt-1 h-8 w-8 text-base" @click="editVisit(visit)" :disabled="!!busy" aria-label="Edit visit">
+              <i class="bi bi-pencil"></i>
+            </button>
+          </div>
+          <div v-if="visit.notes" class="prose prose-sm mt-2 max-w-none dark:prose-invert" v-html="markdown(visit.notes)"></div>
+          <p v-else class="mt-2 text-sm italic text-slate-400">No notes</p>
+        </article>
+      </section>
+    </main>
+
+    <!-- Add / edit person -->
+    <main v-else-if="view === 'editPerson'" class="mx-auto max-w-xl p-3">
+      <form class="space-y-4" @submit.prevent="savePersonForm">
+        <div class="card space-y-4 p-4">
+          <div>
+            <label class="label" for="name">Name <span class="text-red-500">*</span></label>
+            <input id="name" v-model="form.name" class="input" required autocomplete="off" placeholder="Who did you talk to?">
+          </div>
+
+          <div>
+            <label class="label" for="address">Address</label>
+            <textarea id="address" v-model="form.address" class="input" rows="2" placeholder="Street, apartment, landmarks…"></textarea>
+          </div>
+
+          <div>
+            <label class="label" for="coordinates">Location on map</label>
+            <div class="flex gap-2">
+              <input id="coordinates" v-model="form.coordinates" class="input flex-1" autocomplete="off" placeholder="Latitude, longitude">
+              <button type="button" class="btn" @click="useMyLocation" :disabled="locating" aria-label="Use my location">
+                <i class="bi" :class="locating ? 'bi-hourglass-split' : 'bi-crosshair'"></i>
+              </button>
+              <button type="button" class="btn" :class="{ 'ring-2 ring-indigo-500': pickerOpen }" @click="togglePicker" aria-label="Pick on map">
+                <i class="bi bi-map"></i>
+              </button>
+            </div>
+            <template v-if="pickerOpen">
+              <div class="mt-2 flex gap-2">
+                <input v-model="placeQuery" type="search" class="input flex-1" autocomplete="off" enterkeyhint="search"
+                  placeholder="Address or Google Maps link" aria-label="Find a place" @keydown.enter.prevent="findPlaces">
+                <button type="button" class="btn" @click="findPlaces" :disabled="findingPlaces" aria-label="Find place">
+                  <i class="bi" :class="findingPlaces ? 'bi-hourglass-split' : 'bi-search'"></i>
+                </button>
+              </div>
+              <div ref="pickerEl" class="z-0 mt-2 h-72 overflow-hidden rounded-lg"></div>
+              <div v-if="places.length" class="mt-2 space-y-2 rounded-lg bg-amber-50 p-3 ring-1 ring-amber-300 dark:bg-amber-950 dark:ring-amber-800">
+                <p class="text-xs font-medium text-amber-800 dark:text-amber-200">
+                  Is the orange dot in the right spot?{{ places.length > 1 ? ' Tap another match to see it.' : '' }}
+                </p>
+                <button v-for="(place, index) in places" :key="index" type="button" @click="previewPlace(index)"
+                  class="block w-full rounded-lg px-2 py-1.5 text-left text-sm"
+                  :class="index === placeIndex ? 'bg-amber-200 dark:bg-amber-800' : 'active:bg-amber-100 dark:active:bg-amber-900'">
+                  <span v-if="place.name" class="block font-medium">{{ place.name }}</span>
+                  <span class="block">{{ place.address || place.coordinates }}</span>
+                </button>
+                <div class="flex gap-2">
+                  <button type="button" class="btn flex-1 bg-indigo-600 text-white ring-indigo-600 active:bg-indigo-700 dark:bg-indigo-600 dark:text-white dark:ring-indigo-600" @click="confirmPlace">
+                    <i class="bi bi-check-lg"></i> Use this spot
+                  </button>
+                  <button type="button" class="btn" @click="clearPlaces">Cancel</button>
+                </div>
+              </div>
+              <p v-else class="mt-1 text-xs text-slate-500 dark:text-slate-400">Search, or tap the map to drop a pin, then drag it to adjust.</p>
+            </template>
+          </div>
+
+          <label class="flex items-center justify-between gap-3">
+            <span>
+              <span class="block font-medium">Studying</span>
+              <span class="block text-xs text-slate-500 dark:text-slate-400">This person currently has a study.</span>
+            </span>
+            <input type="checkbox" v-model="form.isStudy" class="h-6 w-6 rounded accent-indigo-600">
+          </label>
+
+          <div>
+            <label class="label" for="returnAt">Return at</label>
+            <div class="flex gap-2">
+              <input id="returnAt" v-model="form.returnAt" type="datetime-local" class="input flex-1">
+              <button v-if="form.returnAt" type="button" class="btn" @click="form.returnAt = ''" aria-label="Clear return date">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card p-4">
+          <h3 class="label">Available times</h3>
+          <div class="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-1">
+            <span></span>
+            <button v-for="period in periods" :key="period" type="button" class="py-1 text-xs font-medium text-slate-500 dark:text-slate-400" @click="toggleColumn(period)">
+              {{ period }}
+            </button>
+            <template v-for="day in days" :key="day">
+              <button type="button" class="pr-3 text-left text-sm font-medium" @click="toggleRow(day)">{{ day }}</button>
+              <button v-for="period in periods" :key="period" type="button" class="h-9 rounded-md ring-1"
+                :class="form.availableTimes.includes(day + ' ' + period) ? 'chip-on' : 'chip-off'"
+                @click="toggleTimes([day + ' ' + period])" :aria-label="day + ' ' + period">
+                <i v-if="form.availableTimes.includes(day + ' ' + period)" class="bi bi-check-lg"></i>
+              </button>
+            </template>
+          </div>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Tap a day or a time of day to toggle the whole row or column.</p>
+        </div>
+
+        <div class="card p-4">
+          <h3 class="label">Description</h3>
+          <md-editor v-model="form.description" placeholder="What did you talk about? Interests, family, things to remember…"></md-editor>
+        </div>
+
+        <div class="card p-4">
+          <h3 class="label">Pictures</h3>
+          <div class="grid grid-cols-3 gap-2">
+            <div v-for="(id, index) in form.pictures" :key="id" class="relative aspect-square overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700">
+              <img v-if="pictureCache[id]" :src="pictureCache[id]" class="h-full w-full object-cover" alt="">
+              <button type="button" class="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" @click="form.pictures.splice(index, 1)" aria-label="Remove picture">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div v-for="(pic, index) in form.newPictures" :key="pic.key" class="relative aspect-square overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700">
+              <img :src="pic.dataUrl" class="h-full w-full object-cover" alt="">
+              <span class="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] text-white">{{ Math.round(pic.bytes / 1024) }} KB</span>
+              <button type="button" class="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" @click="form.newPictures.splice(index, 1)" aria-label="Remove picture">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
+              <i class="bi text-2xl" :class="processingPictures ? 'bi-hourglass-split' : 'bi-camera'"></i>
+              <span class="text-xs">{{ processingPictures ? 'Shrinking…' : 'Take photo' }}</span>
+              <input type="file" accept="image/*" capture="environment" class="hidden" @change="addPictureFiles" :disabled="processingPictures">
+            </label>
+            <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
+              <i class="bi text-2xl" :class="processingPictures ? 'bi-hourglass-split' : 'bi-images'"></i>
+              <span class="text-xs">{{ processingPictures ? 'Shrinking…' : 'Choose photos' }}</span>
+              <input type="file" accept="image/*" multiple class="hidden" @change="addPictureFiles" :disabled="processingPictures">
+            </label>
+          </div>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Photos are shrunk to {{ Math.round(maxPictureBytes / 1024) }} KB or less. They’re saved on this device right away and sent to the spreadsheet when it syncs.</p>
+        </div>
+
+        <button type="submit" class="btn-primary w-full" :disabled="!!busy || processingPictures">
+          <i class="bi bi-check-lg"></i> {{ form.id ? 'Save Changes' : 'Add RV' }}
+        </button>
+        <button v-if="form.id" type="button" class="btn-danger w-full" @click="removePerson" :disabled="!!busy">
+          <i class="bi bi-trash"></i> Delete {{ form.name || 'this person' }}
+        </button>
+      </form>
+    </main>
+
+    <!-- Add / edit visit -->
+    <main v-else-if="view === 'visit'" class="mx-auto max-w-xl p-3">
+      <form class="space-y-4" @submit.prevent="saveVisitForm">
+        <div class="card space-y-4 p-4">
+          <div>
+            <label class="label" for="visitCreatedAt">Visit started</label>
+            <input id="visitCreatedAt" v-model="visitForm.createdAt" type="datetime-local" class="input" required>
+          </div>
+          <div>
+            <h3 class="label">Notes</h3>
+            <md-editor v-model="visitForm.notes" :rows="8" placeholder="What did you discuss? What will you talk about next time?"></md-editor>
+            <p v-if="!visitForm.id" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              <i class="bi bi-cloud-check"></i> A draft is kept on this device until you save.
+            </p>
+          </div>
+        </div>
+
+        <div v-if="visitForm.updateReturnAt" class="card space-y-2 p-4">
+          <label class="label" for="visitReturnAt">Next return visit (optional)</label>
+          <input id="visitReturnAt" v-model="visitForm.returnAt" type="datetime-local" class="input">
+          <div class="flex flex-wrap gap-2">
+            <button v-for="weeks in [1, 2, 4]" :key="weeks" type="button" class="chip chip-off" @click="setReturnInWeeks(weeks)">
+              +{{ weeks }} {{ weeks === 1 ? 'week' : 'weeks' }}
+            </button>
+            <button v-if="visitForm.returnAt" type="button" class="chip chip-off" @click="visitForm.returnAt = ''">Clear</button>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Saved as {{ current ? current.name : 'this person' }}'s Return At. Leave it blank to clear it.</p>
+        </div>
+
+        <button type="submit" class="btn-primary w-full" :disabled="!!busy">
+          <i class="bi bi-check-lg"></i> {{ visitForm.id ? 'Save Changes' : 'Save Visit' }}
+        </button>
+        <button v-if="visitForm.id" type="button" class="btn-danger w-full" @click="removeVisit" :disabled="!!busy">
+          <i class="bi bi-trash"></i> Delete Visit
+        </button>
+        <button v-else-if="hasVisitDraft" type="button" class="btn w-full" @click="discardVisitDraft" :disabled="!!busy">
+          Discard Draft
+        </button>
+      </form>
+    </main>
+
+    <!-- Picture viewer -->
+    <div v-if="lightbox" class="fixed inset-0 z-50 flex flex-col bg-black/95" @click.self="lightbox = null">
+      <div class="flex items-center justify-between p-2 text-white">
+        <span class="px-2 text-sm">{{ lightbox.index + 1 }} / {{ lightbox.ids.length }}</span>
+        <button class="icon-btn text-white" @click="lightbox = null" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="relative flex flex-1 items-center justify-center overflow-hidden" @click.self="lightbox = null">
+        <img v-if="pictureCache[lightbox.ids[lightbox.index]]" :src="pictureCache[lightbox.ids[lightbox.index]]" class="max-h-full max-w-full object-contain" alt="">
+        <i v-else class="bi bi-hourglass-split text-3xl text-white"></i>
+        <button v-if="lightbox.ids.length > 1" class="icon-btn absolute left-2 bg-black/40 text-white" @click="stepLightbox(-1)" aria-label="Previous"><i class="bi bi-chevron-left"></i></button>
+        <button v-if="lightbox.ids.length > 1" class="icon-btn absolute right-2 bg-black/40 text-white" @click="stepLightbox(1)" aria-label="Next"><i class="bi bi-chevron-right"></i></button>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div v-if="toast" class="fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+      <div class="flex max-w-md items-start gap-3 rounded-xl px-4 py-3 text-sm text-white shadow-lg" :class="toast.error ? 'bg-red-600' : 'bg-slate-800'">
+        <span class="flex-1">{{ toast.message }}</span>
+        <button @click="toast = null" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
