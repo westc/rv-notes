@@ -40,7 +40,9 @@ New version → Deploy** so the same URL serves the new code.
 ### Permissions
 
 The script uses `@OnlyCurrentDoc`, so it asks only for access to **this** spreadsheet,
-not all of your Google Drive files.
+not all of your Google Drive files. It also asks to **connect to an external service**,
+which it uses only to open Google Maps share links (such as `https://maps.app.goo.gl/…`)
+to find the location in them. Address searches use Apps Script's built-in Maps service.
 
 ### Open it on your phone
 
@@ -132,6 +134,11 @@ Large picture cells make the **Pictures** sheet slow to scroll. You can hide tha
   pictures (tap one to view it full screen), and visits, newest first.
 - **Location.** Type coordinates, tap the crosshair to use your current location, or tap
   the map button and then tap the map to drop a pin. You can drag the pin to adjust it.
+  The map also has a search box (it starts with the person's address). Type an address
+  or paste a Google Maps link (in Google Maps, tap the place, then **Share → Copy link**).
+  The match shows up as an orange dot. If there are several matches, tap one to see it.
+  Tap **Use this spot** to move the pin there. If the Address field is empty, it's filled
+  in with the match's address.
 - **Available times.** Tap the cells in the 7 × 3 grid. Tap a day or a period heading to
   toggle the whole row or column.
 - **New Visit.** Starts with the current date and time. The **Next return visit** field

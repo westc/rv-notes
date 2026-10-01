@@ -317,6 +317,151 @@ function getPicture(id) {
   return `data:${record['Mime Type']};base64,${base64}`;
 }
 
+/* ------------------------------------------------------------------------ */
+/* Finding places                                                           */
+/* ------------------------------------------------------------------------ */
+
+// Only links to these hosts are fetched, e.g. www.google.com, maps.google.co.uk,
+// and maps.app.goo.gl.
+const GOOGLE_HOST = /^(?:[\w-]+\.)*(?:google\.[a-z]{2,3}(?:\.[a-z]{2})?|goo\.gl)$/i;
+
+/**
+ * Finds places for the map picker.
+ *
+ * @param {string} query An address, a Google Maps link (including share links
+ *     such as https://maps.app.goo.gl/…), or "latitude, longitude".
+ * @param {number[]=} bounds [south, west, north, east] of the visible map, so
+ *     nearby matches are preferred.
+ * @returns {{name: string, address: string, coordinates: string}[]} Up to 5
+ *     places, best match first.
+ */
+function findPlaces(query, bounds) {
+  const text = cleanText_(query, 'Search', 2000).replace(/\s+/g, ' ');
+  if (!text) throw new Error('Type an address or paste a Google Maps link.');
+
+  const coords = parseLatLng_(text);
+  if (coords) return [placeAt_(coords, '')];
+
+  const link = /https?:\/\/\S+/i.exec(text);
+  if (link) return placesFromLink_(link[0]);
+
+  return geocode_(text, bounds);
+}
+
+function placesFromLink_(link) {
+  const urls = resolveLink_(link);
+  for (const url of urls) {
+    const coords = coordsFromMapsUrl_(url);
+    if (coords) return [placeAt_(coords, placeTextFromMapsUrl_(url))];
+  }
+  // Some links only name the place, e.g. https://maps.google.com/?q=Some+Place
+  for (const url of urls) {
+    const text = placeTextFromMapsUrl_(url);
+    if (text) return geocode_(text);
+  }
+  throw new Error('Couldn’t find a location in that link. In Google Maps, tap the place, then Share → Copy link.');
+}
+
+/**
+ * Follows redirects (share links redirect to the full Google Maps URL) and
+ * returns each URL along the way.
+ */
+function resolveLink_(url) {
+  const urls = [];
+  for (let i = 0; i < 6 && url; i++) {
+    const origin = /^https?:\/\/([^/?#:]+)/i.exec(url);
+    if (!origin || !GOOGLE_HOST.test(origin[1])) {
+      if (!urls.length) throw new Error('Only Google Maps links are supported.');
+      break;
+    }
+    urls.push(url);
+    if (coordsFromMapsUrl_(url)) break;
+    const response = UrlFetchApp.fetch(url, { followRedirects: false, muteHttpExceptions: true });
+    const headers = response.getHeaders();
+    const location = headers['Location'] || headers['location'] || '';
+    url = location.charAt(0) === '/' ? origin[0] + location : location;
+  }
+  return urls;
+}
+
+/**
+ * Decodes a URL fully, including links nested in it (such as the "continue"
+ * parameter of Google's cookie consent page).
+ */
+function decodeUrl_(url) {
+  let text = String(url);
+  for (let i = 0; i < 3; i++) {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(text.replace(/\+/g, ' '));
+    } catch (e) {
+      break;
+    }
+    if (decoded === text) break;
+    text = decoded;
+  }
+  return text;
+}
+
+function coordsFromMapsUrl_(url) {
+  const text = decodeUrl_(url);
+  const patterns = [
+    /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/, // The place's pin.
+    /[?&](?:q|query|ll|destination|daddr)=(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
+    /\/(?:place|search)\/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
+    /@(-?\d+\.\d+),(-?\d+\.\d+)/ // The middle of the map, when there's no pin.
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const coords = match && toLatLng_(match[1], match[2]);
+    if (coords) return coords;
+  }
+  return null;
+}
+
+/**
+ * @returns {string} The place name or search text in a Google Maps URL, or an
+ *     empty string if it only has coordinates.
+ */
+function placeTextFromMapsUrl_(url) {
+  const text = decodeUrl_(url);
+  const match = /\/(?:place|search)\/([^/@?#]+)/.exec(text) ||
+    /[?&](?:q|query|destination|daddr)=([^&#]+)/.exec(text);
+  const place = match ? match[1].trim() : '';
+  // Dropped pins are named after their coordinates, e.g. 35°02'48.8"N 85°18'34.9"W.
+  return /\d°|^-?\d+(?:\.\d+)?\s*,/.test(place) ? '' : place;
+}
+
+function placeAt_(coords, name) {
+  let address = '';
+  try {
+    const result = Maps.newGeocoder().reverseGeocode(coords.lat, coords.lng).results[0];
+    if (result) address = result.formatted_address;
+  } catch (e) {
+    // The address is only a convenience, so the coordinates are still returned.
+  }
+  return { name: name || '', address, coordinates: formatLatLng_(coords.lat, coords.lng) };
+}
+
+function geocode_(text, bounds) {
+  const geocoder = Maps.newGeocoder();
+  if (Array.isArray(bounds) && bounds.length === 4 &&
+      bounds.every(value => typeof value === 'number' && isFinite(value))) {
+    geocoder.setBounds(bounds[0], bounds[1], bounds[2], bounds[3]);
+  }
+  const response = geocoder.geocode(text);
+  if (response.status !== 'OK' && response.status !== 'ZERO_RESULTS') {
+    throw new Error(`Searching isn’t working right now (${response.status}). Please try again later.`);
+  }
+  const places = (response.results || []).slice(0, 5).map(result => ({
+    name: '',
+    address: result.formatted_address,
+    coordinates: formatLatLng_(result.geometry.location.lat, result.geometry.location.lng)
+  }));
+  if (!places.length) throw new Error(`No places found for “${text}”.`);
+  return places;
+}
+
 function deletePictures_(ids) {
   if (!ids.length) return;
   const table = getTable_('pictures');
@@ -370,12 +515,29 @@ function cleanText_(value, label, maxLength) {
 function normalizeCoordinates_(value) {
   const text = String(value || '').trim();
   if (!text) return '';
-  const match = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/.exec(text);
-  const lat = match && Number(match[1]);
-  const lng = match && Number(match[2]);
-  if (!match || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+  const coords = parseLatLng_(text);
+  if (!coords) {
     throw new Error('Coordinates must be "latitude, longitude", for example "35.046900, -85.309700".');
   }
+  return formatLatLng_(coords.lat, coords.lng);
+}
+
+/**
+ * @returns {?{lat: number, lng: number}} Null unless text is exactly
+ *     "latitude, longitude" within range.
+ */
+function parseLatLng_(text) {
+  const match = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(text);
+  return match ? toLatLng_(match[1], match[2]) : null;
+}
+
+function toLatLng_(latText, lngText) {
+  const lat = Number(latText);
+  const lng = Number(lngText);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+
+function formatLatLng_(lat, lng) {
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 

@@ -192,8 +192,32 @@
               </button>
             </div>
             <template v-if="pickerOpen">
+              <div class="mt-2 flex gap-2">
+                <input v-model="placeQuery" type="search" class="input flex-1" autocomplete="off" enterkeyhint="search"
+                  placeholder="Address or Google Maps link" aria-label="Find a place" @keydown.enter.prevent="findPlaces">
+                <button type="button" class="btn" @click="findPlaces" :disabled="findingPlaces" aria-label="Find place">
+                  <i class="bi" :class="findingPlaces ? 'bi-hourglass-split' : 'bi-search'"></i>
+                </button>
+              </div>
               <div ref="pickerEl" class="z-0 mt-2 h-72 overflow-hidden rounded-lg"></div>
-              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Tap the map to drop a pin, then drag it to adjust.</p>
+              <div v-if="places.length" class="mt-2 space-y-2 rounded-lg bg-amber-50 p-3 ring-1 ring-amber-300 dark:bg-amber-950 dark:ring-amber-800">
+                <p class="text-xs font-medium text-amber-800 dark:text-amber-200">
+                  Is the orange dot in the right spot?{{ places.length > 1 ? ' Tap another match to see it.' : '' }}
+                </p>
+                <button v-for="(place, index) in places" :key="index" type="button" @click="previewPlace(index)"
+                  class="block w-full rounded-lg px-2 py-1.5 text-left text-sm"
+                  :class="index === placeIndex ? 'bg-amber-200 dark:bg-amber-800' : 'active:bg-amber-100 dark:active:bg-amber-900'">
+                  <span v-if="place.name" class="block font-medium">{{ place.name }}</span>
+                  <span class="block">{{ place.address || place.coordinates }}</span>
+                </button>
+                <div class="flex gap-2">
+                  <button type="button" class="btn flex-1 bg-indigo-600 text-white ring-indigo-600 active:bg-indigo-700 dark:bg-indigo-600 dark:text-white dark:ring-indigo-600" @click="confirmPlace">
+                    <i class="bi bi-check-lg"></i> Use this spot
+                  </button>
+                  <button type="button" class="btn" @click="clearPlaces">Cancel</button>
+                </div>
+              </div>
+              <p v-else class="mt-1 text-xs text-slate-500 dark:text-slate-400">Search, or tap the map to drop a pin, then drag it to adjust.</p>
             </template>
           </div>
 
@@ -258,7 +282,12 @@
             </div>
             <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
               <i class="bi text-2xl" :class="processingPictures ? 'bi-hourglass-split' : 'bi-camera'"></i>
-              <span class="text-xs">{{ processingPictures ? 'Shrinking…' : 'Add photos' }}</span>
+              <span class="text-xs">{{ processingPictures ? 'Shrinking…' : 'Take photo' }}</span>
+              <input type="file" accept="image/*" capture="environment" class="hidden" @change="addPictureFiles" :disabled="processingPictures">
+            </label>
+            <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
+              <i class="bi text-2xl" :class="processingPictures ? 'bi-hourglass-split' : 'bi-images'"></i>
+              <span class="text-xs">{{ processingPictures ? 'Shrinking…' : 'Choose photos' }}</span>
               <input type="file" accept="image/*" multiple class="hidden" @change="addPictureFiles" :disabled="processingPictures">
             </label>
           </div>
@@ -857,6 +886,11 @@
         const locating = ref(false);
         let pickerMap = null;
         let pickerMarker = null;
+        const placeQuery = ref('');
+        const findingPlaces = ref(false);
+        const places = ref([]);
+        const placeIndex = ref(0);
+        let previewMarker = null;
 
         // Without coordinates, the map starts near the most recently added
         // person who has some.
@@ -870,6 +904,7 @@
         function openPicker() {
           if (pickerOpen.value) return;
           pickerOpen.value = true;
+          placeQuery.value = form.address.replace(/\s+/g, ' ').trim();
           nextTick(() => {
             if (!pickerEl.value || !window.L) return;
             const coords = parseCoords(form.coordinates);
@@ -883,8 +918,9 @@
 
         function closePicker() {
           if (pickerMap) pickerMap.remove();
-          pickerMap = pickerMarker = null;
+          pickerMap = pickerMarker = previewMarker = null;
           pickerOpen.value = false;
+          places.value = [];
         }
 
         function togglePicker() {
@@ -903,6 +939,56 @@
 
         function setCoordsFromMap(latlng) {
           form.coordinates = formatCoords(latlng.lat, latlng.lng);
+        }
+
+        // Searches by address or Google Maps link. Matches are shown as an
+        // orange dot until one is confirmed.
+        async function findPlaces() {
+          const query = placeQuery.value.trim();
+          if (!query) {
+            showToast('Type an address or paste a Google Maps link.', true);
+            return;
+          }
+          // Prefer matches near the area the map is showing.
+          const bounds = pickerMap && pickerMap.getZoom() >= 10 ? pickerMap.getBounds() : null;
+          findingPlaces.value = true;
+          try {
+            places.value = await callServer('findPlaces', query,
+              bounds && [bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()]);
+            previewPlace(0);
+          } catch (err) {
+            clearPlaces();
+            showError(err);
+          } finally {
+            findingPlaces.value = false;
+          }
+        }
+
+        function previewPlace(index) {
+          placeIndex.value = index;
+          const coords = parseCoords(places.value[index].coordinates);
+          if (!pickerMap || !coords) return;
+          if (previewMarker) {
+            previewMarker.setLatLng(coords);
+          } else {
+            previewMarker = L.circleMarker(coords, {
+              radius: 11, color: '#fff', weight: 3, fillColor: '#f97316', fillOpacity: 1
+            }).addTo(pickerMap);
+          }
+          pickerMap.setView(coords, 17);
+        }
+
+        function confirmPlace() {
+          const place = places.value[placeIndex.value];
+          form.coordinates = place.coordinates;
+          if (!form.address.trim() && place.address) form.address = place.address;
+          clearPlaces();
+        }
+
+        function clearPlaces() {
+          places.value = [];
+          if (previewMarker) previewMarker.remove();
+          previewMarker = null;
         }
 
         watch(() => form.coordinates, value => {
@@ -1068,7 +1154,8 @@
           filteredPeople, current, visits, loadingVisits, pictureCache, lightbox, title, subtitle,
           form, processingPictures, pickerOpen, pickerEl, miniMapEl, locating, visitForm, hasVisitDraft,
           refresh, openPerson, newPerson, editPerson, goBack, toggleTimes, toggleRow, toggleColumn, addPictureFiles,
-          savePersonForm, removePerson, togglePicker, useMyLocation, startVisit, editVisit,
+          savePersonForm, removePerson, togglePicker, useMyLocation,
+          placeQuery, findingPlaces, places, placeIndex, findPlaces, previewPlace, confirmPlace, clearPlaces, startVisit, editVisit,
           saveVisitForm, removeVisit, discardVisitDraft, setReturnInWeeks, openLightbox, stepLightbox,
           markdown, formatDateTime, shortDate, relative, returnBadgeClass, firstLine, timesSummary,
           mapQuery, mapsUrl, directionsUrl
