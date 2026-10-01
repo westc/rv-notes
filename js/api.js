@@ -1,4 +1,5 @@
 // Talks to a spreadsheet's Apps Script web app (apps-script/Code.gs).
+import { t } from './i18n.js';
 
 export class ApiError extends Error {
   /**
@@ -35,10 +36,7 @@ export async function callApi(connection, action, params = {}, { timeout = 90000
       signal: controller.signal
     });
   } catch (err) {
-    throw new ApiError(navigator.onLine === false
-      ? 'You’re offline.'
-      : 'Couldn’t reach the spreadsheet. Check your internet connection. If this keeps happening, make sure the web app’s “Who has access” is set to “Anyone”.',
-    'network');
+    throw new ApiError(t(navigator.onLine === false ? 'api.offline' : 'api.unreachable'), 'network');
   } finally {
     clearTimeout(timer);
   }
@@ -50,11 +48,9 @@ export async function callApi(connection, action, params = {}, { timeout = 90000
     // Handled below.
   }
   if (!body || typeof body.ok !== 'boolean') {
-    throw new ApiError(response.ok
-      ? 'The spreadsheet didn’t answer like RV Notes. Check that the link has the web app URL (ending in /exec) and that the script was deployed.'
-      : `The spreadsheet’s web app had a problem (${response.status}). Try again later.`,
-    response.ok ? 'setup' : 'network');
+    throw new ApiError(response.ok ? t('api.notRvNotes') : t('api.problem', { status: response.status }),
+      response.ok ? 'setup' : 'network');
   }
-  if (!body.ok) throw new ApiError(body.error || 'Something went wrong.', body.code || 'server');
+  if (!body.ok) throw new ApiError(body.error || t('api.failed'), body.code || 'server');
   return body.result;
 }

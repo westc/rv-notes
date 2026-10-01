@@ -30,11 +30,11 @@
     <!-- Header -->
     <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
       <div class="mx-auto flex h-14 max-w-xl items-center gap-1 px-2">
-        <button v-if="canGoBack" class="icon-btn" @click="goBack" :disabled="!!busy" aria-label="Back">
+        <button v-if="canGoBack" class="icon-btn" @click="goBack" :disabled="!!busy" :aria-label="t('common.back')">
           <i class="bi bi-chevron-left"></i>
         </button>
         <div class="min-w-0 flex-1 px-1">
-          <button v-if="view === 'list'" class="flex max-w-full items-center gap-1 text-left" @click="openConnections" aria-label="Switch spreadsheet">
+          <button v-if="view === 'list'" class="flex max-w-full items-center gap-1 text-left" @click="openConnections" :aria-label="t('header.switch')">
             <h1 class="truncate text-lg font-semibold leading-tight">{{ title }}</h1>
             <i class="bi bi-chevron-down shrink-0 text-xs text-slate-500 dark:text-slate-400"></i>
           </button>
@@ -42,20 +42,25 @@
           <p v-if="subtitle" class="truncate text-xs" :class="subtitleClass">{{ subtitle }}</p>
         </div>
         <template v-if="view === 'list'">
-          <button class="icon-btn" @click="openReport()" aria-label="Monthly report">
+          <button class="icon-btn" @click="openReport()" :aria-label="t('header.report')">
             <i class="bi bi-clipboard-data"></i>
           </button>
           <button class="icon-btn" :class="syncIcon.color" @click="syncNow" :aria-label="syncIcon.label">
             <i class="bi" :class="syncIcon.icon"></i>
           </button>
-          <button class="icon-btn text-indigo-600 dark:text-indigo-400" @click="newPerson" :disabled="!!busy" aria-label="Add RV">
+          <button class="icon-btn text-indigo-600 dark:text-indigo-400" @click="newPerson" :disabled="!!busy" :aria-label="t('header.addRv')">
             <i class="bi bi-plus-circle-fill"></i>
           </button>
         </template>
-        <button v-else-if="view === 'person'" class="icon-btn" @click="editPerson" :disabled="!!busy" aria-label="Edit">
-          <i class="bi bi-pencil"></i>
-        </button>
-        <button v-else-if="view === 'connections'" class="icon-btn text-indigo-600 dark:text-indigo-400" @click="startAddConnection" aria-label="Add a spreadsheet">
+        <template v-else-if="view === 'person'">
+          <button class="icon-btn" @click="sharePerson" :disabled="!!busy" :aria-label="t('share.button')">
+            <i class="bi" :class="sharing ? 'bi-hourglass-split' : 'bi-share'"></i>
+          </button>
+          <button class="icon-btn" @click="editPerson" :disabled="!!busy" :aria-label="t('common.edit')">
+            <i class="bi bi-pencil"></i>
+          </button>
+        </template>
+        <button v-else-if="view === 'connections'" class="icon-btn text-indigo-600 dark:text-indigo-400" @click="startAddConnection" :aria-label="t('connections.add')">
           <i class="bi bi-plus-circle-fill"></i>
         </button>
       </div>
@@ -68,114 +73,126 @@
     <div v-if="updateReady || (view === 'list' && (store.status === 'auth' || showInstallTip)) || (['list', 'report'].includes(view) && (timer || store.needsScriptUpdate))" class="mx-auto max-w-xl space-y-2 px-3 pt-3">
       <div v-if="timer && ['list', 'report'].includes(view)" class="flex items-center gap-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900 ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-100 dark:ring-emerald-800">
         <i class="bi bi-stopwatch text-lg"></i>
-        <span class="flex-1">Timer <b class="font-mono tabular-nums">{{ timerElapsed }}</b></span>
-        <button class="btn" @click="stopTimer"><i class="bi bi-stop-fill"></i> Stop</button>
+        <span class="flex-1">{{ t('timer.label') }} <b class="font-mono tabular-nums">{{ timerElapsed }}</b></span>
+        <button class="btn" @click="stopTimer"><i class="bi bi-stop-fill"></i> {{ t('timer.stop') }}</button>
       </div>
       <div v-if="store.needsScriptUpdate && ['list', 'report'].includes(view)" class="flex items-start gap-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
         <i class="bi bi-cloud-arrow-up text-lg"></i>
-        <p class="flex-1">Your time, studies, and reports are saved on this device, but the spreadsheet’s script needs updating before they can sync. Paste the new <b>Code.gs</b> and deploy a new version.</p>
+        <p class="flex-1" v-html="t('notice.scriptUpdate')"></p>
       </div>
       <div v-if="updateReady" class="card flex items-center gap-3 p-3 text-sm">
         <i class="bi bi-stars text-lg text-indigo-600 dark:text-indigo-400"></i>
-        <span class="flex-1">A new version of RV Notes is ready.</span>
-        <button class="btn" @click="applyUpdate">Reload</button>
+        <span class="flex-1">{{ t('notice.update') }}</span>
+        <button class="btn" @click="applyUpdate">{{ t('notice.reload') }}</button>
       </div>
       <div v-if="view === 'list' && store.status === 'auth'" class="flex items-start gap-3 rounded-xl bg-red-50 p-3 text-sm text-red-800 ring-1 ring-red-200 dark:bg-red-950 dark:text-red-200 dark:ring-red-900">
         <i class="bi bi-key text-lg"></i>
         <div class="flex-1">
           <p>{{ store.statusMessage }}</p>
-          <p class="mt-1 text-xs">Your changes are kept on this device until then.</p>
+          <p class="mt-1 text-xs">{{ t('notice.keptUntilThen') }}</p>
         </div>
-        <button class="btn" @click="startAddConnection">Connect</button>
+        <button class="btn" @click="startAddConnection">{{ t('connect.button') }}</button>
       </div>
       <div v-if="view === 'list' && showInstallTip" class="card flex items-start gap-3 p-3 text-sm">
         <i class="bi bi-phone text-lg text-indigo-600 dark:text-indigo-400"></i>
-        <p class="flex-1">
-          To use RV Notes without internet, add it to your home screen:
-          <template v-if="isIos">tap <i class="bi bi-box-arrow-up"></i> <b>Share</b>, then <b>Add to Home Screen</b>.</template>
-          <template v-else>open your browser’s menu, then <b>Install app</b> or <b>Add to Home screen</b>.</template>
-        </p>
-        <button class="-m-1 p-1 text-slate-400" @click="dismissInstallTip" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+        <p class="flex-1" v-html="t(isIos ? 'notice.installIos' : 'notice.installOther')"></p>
+        <button class="-m-1 p-1 text-slate-400" @click="dismissInstallTip" :aria-label="t('common.dismiss')"><i class="bi bi-x-lg"></i></button>
       </div>
     </div>
 
     <!-- Welcome -->
     <main v-if="view === 'welcome'" class="mx-auto max-w-xl space-y-3 p-3">
       <div class="card space-y-3 p-5">
-        <h2 class="text-lg font-semibold">Welcome to RV Notes</h2>
-        <p>Your return visit notes are kept in a Google Sheet you own, with a copy on this device so the app works without internet.</p>
+        <h2 class="text-lg font-semibold">{{ t('welcome.title') }}</h2>
+        <p>{{ t('welcome.intro') }}</p>
         <ol class="list-decimal space-y-1 pl-5 text-sm">
-          <li>Open your RV Notes spreadsheet on a computer.</li>
-          <li>Choose <b>RV Notes → Connect app</b>.</li>
-          <li>Tap <b>Scan QR code</b> and point the camera at the code, or copy the link and paste it here.</li>
+          <li>{{ t('welcome.step1') }}</li>
+          <li v-html="t('welcome.step2')"></li>
+          <li v-html="t('welcome.step3')"></li>
         </ol>
-        <button class="btn-primary w-full" @click="openScanner"><i class="bi bi-qr-code-scan"></i> Scan QR code</button>
-        <button class="btn w-full" @click="startAddConnection"><i class="bi bi-link-45deg"></i> Paste a link</button>
+        <button class="btn-primary w-full" @click="openScanner"><i class="bi bi-qr-code-scan"></i> {{ t('scan.button') }}</button>
+        <button class="btn w-full" @click="startAddConnection"><i class="bi bi-link-45deg"></i> {{ t('welcome.paste') }}</button>
         <p class="text-xs text-slate-500 dark:text-slate-400">
-          Setting up a spreadsheet for the first time? Follow the
-          <a class="text-indigo-600 underline dark:text-indigo-400" href="https://github.com/westc/rv-notes#set-up-a-spreadsheet" target="_blank" rel="noopener">setup steps</a>.
+          {{ t('welcome.firstTime') }}
+          <a class="text-indigo-600 underline dark:text-indigo-400" href="https://github.com/westc/rv-notes#set-up-a-spreadsheet" target="_blank" rel="noopener">{{ t('welcome.setupSteps') }}</a>
         </p>
+        <label class="block">
+          <span class="label">{{ t('settings.language') }}</span>
+          <select class="input" :value="language" @change="changeLanguage($event.target.value)">
+            <option v-for="lang in languages" :key="lang.code" :value="lang.code">{{ lang.name }}</option>
+          </select>
+        </label>
       </div>
     </main>
 
-    <!-- Spreadsheets (connections) -->
+    <!-- Settings and spreadsheets (connections) -->
     <main v-else-if="view === 'connections'" class="mx-auto max-w-xl space-y-3 p-3">
+      <h2 class="section-title">{{ t('connections.spreadsheets') }}</h2>
       <ul class="space-y-2">
         <li v-for="c in store.connections" :key="c.id" class="card flex items-center gap-2 p-3">
           <button class="min-w-0 flex-1 text-left" @click="switchConnection(c.id)">
             <span class="flex items-center gap-2">
               <span class="truncate font-semibold">{{ c.name }}</span>
-              <i v-if="store.active && c.id === store.active.id" class="bi bi-check-circle-fill text-indigo-600 dark:text-indigo-400" aria-label="Open"></i>
+              <i v-if="store.active && c.id === store.active.id" class="bi bi-check-circle-fill text-indigo-600 dark:text-indigo-400" :aria-label="t('connections.open')"></i>
             </span>
             <span class="block text-xs text-slate-500 dark:text-slate-400">
-              {{ c.lastSyncAt ? 'Synced ' + relative(c.lastSyncAt, now) : 'Not synced yet' }}<template v-if="pendingCounts[c.id]"> &middot; {{ changesWaiting(pendingCounts[c.id]) }}</template>
+              {{ c.lastSyncAt ? t('sync.synced', { when: relative(c.lastSyncAt, now) }) : t('connections.notSynced') }}<template v-if="pendingCounts[c.id]"> &middot; {{ t('sync.waiting', { count: pendingCounts[c.id] }) }}</template>
             </span>
           </button>
-          <button class="icon-btn h-9 w-9 text-base" @click="renameConnection(c)" aria-label="Rename"><i class="bi bi-pencil"></i></button>
-          <button class="icon-btn h-9 w-9 text-base text-red-600 dark:text-red-400" @click="removeConnection(c)" aria-label="Remove from this device"><i class="bi bi-trash"></i></button>
+          <button class="icon-btn h-9 w-9 text-base" @click="renameConnection(c)" :aria-label="t('connections.rename')"><i class="bi bi-pencil"></i></button>
+          <button class="icon-btn h-9 w-9 text-base text-red-600 dark:text-red-400" @click="removeConnection(c)" :aria-label="t('connections.remove')"><i class="bi bi-trash"></i></button>
         </li>
       </ul>
-      <button class="btn w-full" @click="startAddConnection"><i class="bi bi-plus-lg"></i> Add a spreadsheet</button>
+      <button class="btn w-full" @click="startAddConnection"><i class="bi bi-plus-lg"></i> {{ t('connections.add') }}</button>
       <button v-if="store.active" class="btn w-full" @click="redownload" :disabled="!!busy || store.status === 'syncing'">
-        <i class="bi bi-cloud-download"></i> Download {{ store.active.name }} again
+        <i class="bi bi-cloud-download"></i> {{ t('connections.redownload', { name: store.active.name }) }}
       </button>
-      <p class="px-1 text-xs text-slate-500 dark:text-slate-400">
-        Each spreadsheet’s notes are kept separately on this device. Removing one only deletes this device’s copy. The spreadsheet isn’t changed.
-      </p>
+      <p class="px-1 text-xs text-slate-500 dark:text-slate-400">{{ t('connections.separate') }}</p>
+
+      <h2 class="section-title pt-2">{{ t('settings.title') }}</h2>
+      <div class="card space-y-3 p-4">
+        <label class="block">
+          <span class="label">{{ t('settings.language') }}</span>
+          <select class="input" :value="language" @change="changeLanguage($event.target.value)">
+            <option v-for="lang in languages" :key="lang.code" :value="lang.code">{{ lang.name }}</option>
+          </select>
+        </label>
+        <a class="btn w-full" href="https://github.com/westc/rv-notes" target="_blank" rel="noopener"><i class="bi bi-github"></i> {{ t('settings.github') }}</a>
+      </div>
     </main>
 
     <!-- Add a spreadsheet (connection) -->
     <main v-else-if="view === 'addConnection'" class="mx-auto max-w-xl p-3">
       <form class="space-y-4" @submit.prevent="saveConnectionForm">
         <div class="card space-y-4 p-4">
-          <button type="button" class="btn w-full" @click="openScanner"><i class="bi bi-qr-code-scan"></i> Scan QR code</button>
+          <button type="button" class="btn w-full" @click="openScanner"><i class="bi bi-qr-code-scan"></i> {{ t('scan.button') }}</button>
           <div>
-            <label class="label" for="connectLink">Link from the spreadsheet</label>
+            <label class="label" for="connectLink">{{ t('connect.link') }}</label>
             <textarea id="connectLink" v-model="connectForm.link" class="input font-mono text-xs" rows="3" required
               autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…#connect=…"></textarea>
-            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">In the spreadsheet on a computer, choose <b>RV Notes → Connect app</b>, then <b>Copy</b>.</p>
-            <p v-if="connectForm.link && !connectLink" class="mt-1 text-xs text-red-600 dark:text-red-400">This isn’t a Connect app link.</p>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400" v-html="t('connect.linkHint')"></p>
+            <p v-if="connectForm.link && !connectLink" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ t('connect.notALink') }}</p>
           </div>
           <div>
-            <label class="label" for="connectName">Name on this device</label>
-            <input id="connectName" v-model="connectForm.name" class="input" required autocomplete="off" placeholder="For example, Chris’ RVs">
+            <label class="label" for="connectName">{{ t('connect.name') }}</label>
+            <input id="connectName" v-model="connectForm.name" class="input" required autocomplete="off" :placeholder="t('connect.namePlaceholder')">
           </div>
           <div v-if="isIos && !isStandalone && connectLink" class="space-y-2 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-950 ring-1 ring-indigo-200 dark:bg-indigo-950 dark:text-indigo-100 dark:ring-indigo-800">
-            <p>On iPhone and iPad, the Home Screen app keeps its notes separate from Safari. To use RV Notes from your Home Screen:</p>
+            <p>{{ t('connect.iosIntro') }}</p>
             <ol class="list-decimal space-y-1 pl-5">
-              <li>Tap <i class="bi bi-box-arrow-up"></i> <b>Share</b>, then <b>Add to Home Screen</b>.</li>
-              <li>Open RV Notes from your Home Screen and tap <b>Scan QR code</b>.</li>
+              <li v-html="t('connect.iosStep1')"></li>
+              <li v-html="t('connect.iosStep2')"></li>
             </ol>
-            <p>Or tap <b>Copy link</b> and paste it in the Home Screen app.</p>
-            <button type="button" class="btn w-full" @click="copyText(connectForm.link)"><i class="bi bi-clipboard"></i> Copy link</button>
-            <p class="text-xs">Or tap <b>Connect</b> below to use RV Notes in Safari.</p>
+            <p v-html="t('connect.iosCopy')"></p>
+            <button type="button" class="btn w-full" @click="copyText(connectForm.link)"><i class="bi bi-clipboard"></i> {{ t('connect.copyLink') }}</button>
+            <p class="text-xs" v-html="t('connect.iosSafari')"></p>
           </div>
           <p v-if="connectExisting" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
-            This device is already connected to this spreadsheet as “{{ connectExisting.name }}”. Connecting updates its key and name, and keeps any changes that haven’t synced yet.
+            {{ t('connect.existing', { name: connectExisting.name }) }}
           </p>
         </div>
         <button type="submit" class="btn-primary w-full" :disabled="!!busy || !connectLink">
-          <i class="bi bi-link-45deg"></i> Connect
+          <i class="bi bi-link-45deg"></i> {{ t('connect.button') }}
         </button>
       </form>
     </main>
@@ -184,24 +201,29 @@
     <main v-else-if="view === 'list'" class="mx-auto max-w-xl space-y-3 p-3">
       <div class="relative">
         <i class="bi bi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-        <input v-model="search" type="search" class="input pl-9" placeholder="Search names, addresses, descriptions">
+        <input v-model="search" type="search" class="input pl-9" :placeholder="t('list.search')">
       </div>
       <div class="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
         <button v-for="f in filters" :key="f.key" class="chip" :class="filter === f.key ? 'chip-on' : 'chip-off'" @click="filter = f.key">
           {{ f.label }} <span class="opacity-70">{{ f.count }}</span>
         </button>
       </div>
+      <div v-if="allTags.length" class="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1" :aria-label="t('tags.filter')">
+        <button v-for="tag in allTags" :key="tag" class="chip text-xs" :class="tagFilter === tag ? 'chip-on' : 'chip-off'" @click="tagFilter = tagFilter === tag ? '' : tag">
+          <i class="bi bi-tag"></i> {{ tag }}
+        </button>
+      </div>
 
       <div v-if="!people.length && store.status === 'syncing' && !store.active.lastSyncAt" class="card p-6 text-center text-slate-500 dark:text-slate-400">
         <i class="bi bi-cloud-download text-4xl"></i>
-        <p class="mt-2">Downloading your notes…</p>
+        <p class="mt-2">{{ t('list.downloading') }}</p>
       </div>
       <div v-else-if="!people.length" class="card p-6 text-center text-slate-500 dark:text-slate-400">
         <i class="bi bi-journal-plus text-4xl"></i>
-        <p class="mt-2">No return visits yet.</p>
-        <button class="btn-primary mt-4" @click="newPerson"><i class="bi bi-plus-lg"></i> Add your first RV</button>
+        <p class="mt-2">{{ t('list.empty') }}</p>
+        <button class="btn-primary mt-4" @click="newPerson"><i class="bi bi-plus-lg"></i> {{ t('list.addFirst') }}</button>
       </div>
-      <p v-else-if="!filteredPeople.length" class="p-6 text-center text-slate-500 dark:text-slate-400">No one matches.</p>
+      <p v-else-if="!filteredPeople.length" class="p-6 text-center text-slate-500 dark:text-slate-400">{{ t('list.noMatch') }}</p>
 
       <ul class="space-y-2">
         <li v-for="person in filteredPeople" :key="person.id">
@@ -209,13 +231,19 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="truncate font-semibold">{{ person.name }}</span>
-                <span v-if="person.isStudy" class="badge badge-study shrink-0"><i class="bi bi-book"></i> Study</span>
+                <span v-if="person.isStudy" class="badge badge-study shrink-0"><i class="bi bi-book"></i> {{ t('person.study') }}</span>
               </div>
               <p v-if="person.address" class="truncate text-sm text-slate-500 dark:text-slate-400">{{ firstLine(person.address) }}</p>
-              <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                {{ person.lastVisitAt ? 'Last visit ' + relative(person.lastVisitAt, now) : 'No visits yet' }}
-                <template v-if="person.visitCount > 1"> &middot; {{ person.visitCount }} visits</template>
+              <p v-if="person.lastNotes" class="mt-1 line-clamp-2 text-sm text-slate-700 dark:text-slate-300">
+                <i class="bi bi-chat-left-text mr-1 text-xs text-slate-400"></i>{{ person.lastNotes }}
               </p>
+              <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {{ person.lastVisitAt ? t('list.lastVisit', { when: relative(person.lastVisitAt, now) }) : t('list.noVisits') }}
+                <template v-if="person.visitCount > 1"> &middot; {{ t('list.visitCount', { count: person.visitCount }) }}</template>
+              </p>
+              <div v-if="person.tags.length" class="mt-1 flex flex-wrap gap-1">
+                <span v-for="tag in person.tags" :key="tag" class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-slate-700 dark:text-slate-300">{{ tag }}</span>
+              </div>
             </div>
             <span v-if="person.returnAt" class="badge shrink-0" :class="returnBadgeClass(person.returnAt)">
               <i class="bi bi-calendar-event"></i> {{ shortDate(person.returnAt) }}
@@ -227,28 +255,45 @@
 
     <!-- Person -->
     <main v-else-if="view === 'person' && current" class="mx-auto max-w-xl space-y-3 p-3">
+      <div v-if="readyShare" class="card flex items-center gap-3 p-3 text-sm">
+        <i class="bi bi-file-earmark-pdf text-lg text-red-600"></i>
+        <span class="flex-1">{{ t('share.ready') }}</span>
+        <button class="btn" @click="shareReady"><i class="bi bi-share"></i> {{ t('share.button') }}</button>
+      </div>
       <section class="card space-y-3 p-4">
-        <div v-if="current.isStudy || current.returnAt" class="flex flex-wrap gap-2">
-          <span v-if="current.isStudy" class="badge badge-study"><i class="bi bi-book"></i> Study</span>
+        <div v-if="current.isStudy || current.returnAt || current.tags.length" class="flex flex-wrap gap-2">
+          <span v-if="current.isStudy" class="badge badge-study"><i class="bi bi-book"></i> {{ t('person.study') }}</span>
           <span v-if="current.returnAt" class="badge" :class="returnBadgeClass(current.returnAt)">
-            <i class="bi bi-calendar-event"></i> Return {{ formatDateTime(current.returnAt) }} ({{ relative(current.returnAt, now) }})
+            <i class="bi bi-calendar-event"></i> {{ t('person.returnOn', { date: formatDateTime(current.returnAt), when: relative(current.returnAt, now) }) }}
           </span>
+          <span v-for="tag in current.tags" :key="tag" class="badge bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200"><i class="bi bi-tag"></i> {{ tag }}</span>
+        </div>
+
+        <div v-if="current.returnAt && new Date(current.returnAt) > now">
+          <button v-if="!calendarOpen" class="btn w-full" @click="calendarOpen = true"><i class="bi bi-calendar-plus"></i> {{ t('calendar.add') }}</button>
+          <div v-else class="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
+            <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('calendar.hint') }}</p>
+            <div class="flex gap-2">
+              <a class="btn flex-1" :href="googleCalendarUrl(current)" target="_blank" rel="noopener" @click="calendarOpen = false"><i class="bi bi-google"></i> {{ t('calendar.google') }}</a>
+              <button class="btn flex-1" @click="downloadCalendarFile(current)"><i class="bi bi-calendar-event"></i> {{ t('calendar.file') }}</button>
+            </div>
+          </div>
         </div>
 
         <button v-if="current.isStudy || personStudyCounted" class="btn w-full justify-start" :class="personStudyCounted ? 'ring-emerald-300 dark:ring-emerald-700' : ''" @click="togglePersonStudy">
           <i class="bi" :class="personStudyCounted ? 'bi-check-circle-fill text-emerald-600 dark:text-emerald-400' : 'bi-circle'"></i>
-          {{ personStudyCounted ? 'Counted as a study in ' + monthLabel(personStudyMonth) : 'Count as a study in ' + monthLabel(personStudyMonth) }}
+          {{ t(personStudyCounted ? 'study.counted' : 'study.count', { month: monthLabel(personStudyMonth) }) }}
         </button>
 
         <p v-if="current.address" class="whitespace-pre-line">{{ current.address }}</p>
         <div v-if="current.coordinates" ref="miniMapEl" class="z-0 h-40 overflow-hidden rounded-lg"></div>
         <div v-if="mapQuery(current)" class="flex gap-2">
-          <a class="btn flex-1" :href="mapsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-geo-alt"></i> Open in Maps</a>
-          <a class="btn flex-1" :href="directionsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-sign-turn-right"></i> Directions</a>
+          <a class="btn flex-1" :href="mapsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-geo-alt"></i> {{ t('person.openMaps') }}</a>
+          <a class="btn flex-1" :href="directionsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-sign-turn-right"></i> {{ t('person.directions') }}</a>
         </div>
 
         <div v-if="current.availableTimes.length">
-          <h3 class="label">Available</h3>
+          <h3 class="label">{{ t('person.available') }}</h3>
           <ul class="text-sm">
             <li v-for="line in timesSummary(current.availableTimes)" :key="line">{{ line }}</li>
           </ul>
@@ -257,7 +302,7 @@
         <div v-if="current.description" class="prose prose-sm max-w-none dark:prose-invert" v-html="markdown(current.description)"></div>
 
         <p v-if="!current.address && !current.coordinates && !current.description && !current.availableTimes.length" class="text-sm text-slate-500 dark:text-slate-400">
-          No details yet. Tap <i class="bi bi-pencil"></i> to add an address, location, or description.
+          {{ t('person.noDetails') }}
         </p>
       </section>
 
@@ -268,23 +313,23 @@
         </button>
       </section>
 
-      <button class="btn-primary w-full" @click="startVisit" :disabled="!!busy"><i class="bi bi-plus-lg"></i> Add Visit</button>
+      <button class="btn-primary w-full" @click="startVisit" :disabled="!!busy"><i class="bi bi-plus-lg"></i> {{ t('visit.add') }}</button>
 
       <section class="space-y-2">
-        <h2 class="section-title">Visits ({{ visits.length }})</h2>
-        <p v-if="!visits.length" class="p-4 text-center text-sm text-slate-500 dark:text-slate-400">No visits yet.</p>
+        <h2 class="section-title">{{ t('person.visits', { count: visits.length }) }}</h2>
+        <p v-if="!visits.length" class="p-4 text-center text-sm text-slate-500 dark:text-slate-400">{{ t('list.noVisits') }}</p>
         <article v-for="visit in visits" :key="visit.id" class="card p-3">
           <div class="flex items-start gap-2">
             <div class="flex-1">
               <p class="text-sm font-semibold">{{ formatDateTime(visit.createdAt) }}</p>
               <p class="text-xs text-slate-500 dark:text-slate-400">{{ relative(visit.createdAt, now) }}</p>
             </div>
-            <button class="icon-btn -mr-1 -mt-1 h-8 w-8 text-base" @click="editVisit(visit)" :disabled="!!busy" aria-label="Edit visit">
+            <button class="icon-btn -mr-1 -mt-1 h-8 w-8 text-base" @click="editVisit(visit)" :disabled="!!busy" :aria-label="t('visit.edit')">
               <i class="bi bi-pencil"></i>
             </button>
           </div>
           <div v-if="visit.notes" class="prose prose-sm mt-2 max-w-none dark:prose-invert" v-html="markdown(visit.notes)"></div>
-          <p v-else class="mt-2 text-sm italic text-slate-400">No notes</p>
+          <p v-else class="mt-2 text-sm italic text-slate-400">{{ t('visit.noNotes') }}</p>
         </article>
       </section>
     </main>
@@ -294,38 +339,38 @@
       <form class="space-y-4" @submit.prevent="savePersonForm">
         <div class="card space-y-4 p-4">
           <div>
-            <label class="label" for="name">Name <span class="text-red-500">*</span></label>
-            <input id="name" v-model="form.name" class="input" required autocomplete="off" placeholder="Who did you talk to?">
+            <label class="label" for="name">{{ t('form.name') }} <span class="text-red-500">*</span></label>
+            <input id="name" v-model="form.name" class="input" required autocomplete="off" :placeholder="t('form.namePlaceholder')">
           </div>
 
           <div>
-            <label class="label" for="address">Address</label>
-            <textarea id="address" v-model="form.address" class="input" rows="2" placeholder="Street, apartment, landmarks…"></textarea>
+            <label class="label" for="address">{{ t('form.address') }}</label>
+            <textarea id="address" v-model="form.address" class="input" rows="2" :placeholder="t('form.addressPlaceholder')"></textarea>
           </div>
 
           <div>
-            <label class="label" for="coordinates">Location on map</label>
+            <label class="label" for="coordinates">{{ t('form.location') }}</label>
             <div class="flex gap-2">
-              <input id="coordinates" v-model="form.coordinates" class="input flex-1" autocomplete="off" placeholder="Latitude, longitude">
-              <button type="button" class="btn" @click="useMyLocation" :disabled="locating" aria-label="Use my location">
+              <input id="coordinates" v-model="form.coordinates" class="input flex-1" autocomplete="off" :placeholder="t('form.coordinatesPlaceholder')">
+              <button type="button" class="btn" @click="useMyLocation" :disabled="locating" :aria-label="t('form.useLocation')">
                 <i class="bi" :class="locating ? 'bi-hourglass-split' : 'bi-crosshair'"></i>
               </button>
-              <button type="button" class="btn" :class="{ 'ring-2 ring-indigo-500': pickerOpen }" @click="togglePicker" aria-label="Pick on map">
+              <button type="button" class="btn" :class="{ 'ring-2 ring-indigo-500': pickerOpen }" @click="togglePicker" :aria-label="t('form.pickOnMap')">
                 <i class="bi bi-map"></i>
               </button>
             </div>
             <template v-if="pickerOpen">
               <div class="mt-2 flex gap-2">
                 <input v-model="placeQuery" type="search" class="input flex-1" autocomplete="off" enterkeyhint="search"
-                  placeholder="Address or Google Maps link" aria-label="Find a place" @keydown.enter.prevent="findPlaces">
-                <button type="button" class="btn" @click="findPlaces" :disabled="findingPlaces" aria-label="Find place">
+                  :placeholder="t('map.searchPlaceholder')" :aria-label="t('map.find')" @keydown.enter.prevent="findPlaces">
+                <button type="button" class="btn" @click="findPlaces" :disabled="findingPlaces" :aria-label="t('map.find')">
                   <i class="bi" :class="findingPlaces ? 'bi-hourglass-split' : 'bi-search'"></i>
                 </button>
               </div>
               <div ref="pickerEl" class="z-0 mt-2 h-72 overflow-hidden rounded-lg"></div>
               <div v-if="places.length" class="mt-2 space-y-2 rounded-lg bg-amber-50 p-3 ring-1 ring-amber-300 dark:bg-amber-950 dark:ring-amber-800">
                 <p class="text-xs font-medium text-amber-800 dark:text-amber-200">
-                  Is the orange dot in the right spot?{{ places.length > 1 ? ' Tap another match to see it.' : '' }}
+                  {{ t('map.confirmSpot') }}{{ places.length > 1 ? ' ' + t('map.otherMatches') : '' }}
                 </p>
                 <button v-for="(place, index) in places" :key="index" type="button" @click="previewPlace(index)"
                   class="block w-full rounded-lg px-2 py-1.5 text-left text-sm"
@@ -335,93 +380,114 @@
                 </button>
                 <div class="flex gap-2">
                   <button type="button" class="btn flex-1 bg-indigo-600 text-white ring-indigo-600 active:bg-indigo-700 dark:bg-indigo-600 dark:text-white dark:ring-indigo-600" @click="confirmPlace">
-                    <i class="bi bi-check-lg"></i> Use this spot
+                    <i class="bi bi-check-lg"></i> {{ t('map.useSpot') }}
                   </button>
-                  <button type="button" class="btn" @click="clearPlaces">Cancel</button>
+                  <button type="button" class="btn" @click="clearPlaces">{{ t('common.cancel') }}</button>
                 </div>
               </div>
-              <p v-else class="mt-1 text-xs text-slate-500 dark:text-slate-400">Search, or tap the map to drop a pin, then drag it to adjust.</p>
+              <p v-else class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ t('map.hint') }}</p>
             </template>
           </div>
 
           <label class="flex items-center justify-between gap-3">
             <span>
-              <span class="block font-medium">Studying</span>
-              <span class="block text-xs text-slate-500 dark:text-slate-400">This person currently has a study.</span>
+              <span class="block font-medium">{{ t('form.studying') }}</span>
+              <span class="block text-xs text-slate-500 dark:text-slate-400">{{ t('form.studyingHint') }}</span>
             </span>
             <input type="checkbox" v-model="form.isStudy" class="h-6 w-6 rounded accent-indigo-600">
           </label>
 
           <div>
-            <label class="label" for="returnAt">Return at</label>
+            <label class="label" for="returnAt">{{ t('form.returnAt') }}</label>
             <div class="flex gap-2">
               <input id="returnAt" v-model="form.returnAt" type="datetime-local" class="input flex-1">
-              <button v-if="form.returnAt" type="button" class="btn" @click="form.returnAt = ''" aria-label="Clear return date">
+              <button v-if="form.returnAt" type="button" class="btn" @click="form.returnAt = ''" :aria-label="t('form.clearReturn')">
                 <i class="bi bi-x-lg"></i>
               </button>
             </div>
           </div>
+
+          <div>
+            <label class="label" for="tagInput">{{ t('tags.label') }}</label>
+            <div class="flex flex-wrap items-center gap-1 rounded-lg p-1.5 ring-1 ring-slate-300 focus-within:ring-2 focus-within:ring-indigo-500 dark:ring-slate-600">
+              <span v-for="(tag, index) in form.tags" :key="tag" class="inline-flex items-center gap-1 rounded-full bg-indigo-100 py-0.5 pl-2 pr-1 text-sm text-indigo-900 dark:bg-indigo-900 dark:text-indigo-100">
+                {{ tag }}
+                <button type="button" class="flex h-5 w-5 items-center justify-center rounded-full active:bg-indigo-200 dark:active:bg-indigo-800" @click="form.tags.splice(index, 1)" :aria-label="t('tags.remove', { tag })">
+                  <i class="bi bi-x text-sm"></i>
+                </button>
+              </span>
+              <input id="tagInput" v-model="tagInput" class="min-w-[8rem] flex-1 border-0 bg-transparent p-1 text-base focus:outline-none focus:ring-0" autocomplete="off" autocapitalize="off"
+                :placeholder="form.tags.length ? '' : t('tags.placeholder')" enterkeyhint="done"
+                @input="cleanTagInput" @keydown.enter.prevent="addTag()" @keydown.backspace="tagBackspace" @blur="addTag()">
+            </div>
+            <div v-if="tagSuggestions.length" class="mt-2 flex flex-wrap gap-1">
+              <button v-for="tag in tagSuggestions" :key="tag" type="button" class="chip chip-off text-xs" @mousedown.prevent @click="addTag(tag)">
+                <i class="bi bi-plus"></i> {{ tag }}
+              </button>
+            </div>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ t('tags.hint') }}</p>
+          </div>
         </div>
 
         <div class="card p-4">
-          <h3 class="label">Available times</h3>
+          <h3 class="label">{{ t('form.availableTimes') }}</h3>
           <div class="grid grid-cols-[auto_1fr_1fr_1fr] items-center gap-1">
             <span></span>
             <button v-for="period in periods" :key="period" type="button" class="py-1 text-xs font-medium text-slate-500 dark:text-slate-400" @click="toggleColumn(period)">
-              {{ period }}
+              {{ t('period.' + period) }}
             </button>
             <template v-for="day in days" :key="day">
-              <button type="button" class="pr-3 text-left text-sm font-medium" @click="toggleRow(day)">{{ day }}</button>
+              <button type="button" class="pr-3 text-left text-sm font-medium" @click="toggleRow(day)">{{ t('day.' + day) }}</button>
               <button v-for="period in periods" :key="period" type="button" class="h-9 rounded-md ring-1"
                 :class="form.availableTimes.includes(day + ' ' + period) ? 'chip-on' : 'chip-off'"
-                @click="toggleTimes([day + ' ' + period])" :aria-label="day + ' ' + period">
+                @click="toggleTimes([day + ' ' + period])" :aria-label="t('day.' + day) + ' ' + t('period.' + period)">
                 <i v-if="form.availableTimes.includes(day + ' ' + period)" class="bi bi-check-lg"></i>
               </button>
             </template>
           </div>
-          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Tap a day or a time of day to toggle the whole row or column.</p>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{{ t('form.timesHint') }}</p>
         </div>
 
         <div class="card p-4">
-          <h3 class="label">Description</h3>
-          <md-editor v-model="form.description" placeholder="What did you talk about? Interests, family, things to remember…"></md-editor>
+          <h3 class="label">{{ t('form.description') }}</h3>
+          <md-editor v-model="form.description" :placeholder="t('form.descriptionPlaceholder')"></md-editor>
         </div>
 
         <div class="card p-4">
-          <h3 class="label">Pictures</h3>
+          <h3 class="label">{{ t('form.pictures') }}</h3>
           <div class="grid grid-cols-3 gap-2">
             <div v-for="(id, index) in form.pictures" :key="id" class="relative aspect-square overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700">
               <img v-if="pictureCache[id]" :src="pictureCache[id]" class="h-full w-full object-cover" alt="">
-              <button type="button" class="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" @click="form.pictures.splice(index, 1)" aria-label="Remove picture">
+              <button type="button" class="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" @click="form.pictures.splice(index, 1)" :aria-label="t('form.removePicture')">
                 <i class="bi bi-x-lg"></i>
               </button>
             </div>
             <div v-for="(pic, index) in form.newPictures" :key="pic.key" class="relative aspect-square overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700">
               <img :src="pic.dataUrl" class="h-full w-full object-cover" alt="">
               <span class="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] text-white">{{ Math.round(pic.bytes / 1024) }} KB</span>
-              <button type="button" class="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" @click="form.newPictures.splice(index, 1)" aria-label="Remove picture">
+              <button type="button" class="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" @click="form.newPictures.splice(index, 1)" :aria-label="t('form.removePicture')">
                 <i class="bi bi-x-lg"></i>
               </button>
             </div>
-            <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
+            <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-center text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
               <i class="bi text-2xl" :class="processingPictures ? 'bi-hourglass-split' : 'bi-camera'"></i>
-              <span class="text-xs">{{ processingPictures ? 'Shrinking…' : 'Take photo' }}</span>
+              <span class="text-xs">{{ processingPictures ? t('form.shrinking') : t('form.takePhoto') }}</span>
               <input type="file" accept="image/*" capture="environment" class="hidden" @change="addPictureFiles" :disabled="processingPictures">
             </label>
-            <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
+            <label class="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-center text-slate-500 active:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:active:bg-slate-800">
               <i class="bi text-2xl" :class="processingPictures ? 'bi-hourglass-split' : 'bi-images'"></i>
-              <span class="text-xs">{{ processingPictures ? 'Shrinking…' : 'Choose photos' }}</span>
+              <span class="text-xs">{{ processingPictures ? t('form.shrinking') : t('form.choosePhotos') }}</span>
               <input type="file" accept="image/*" multiple class="hidden" @change="addPictureFiles" :disabled="processingPictures">
             </label>
           </div>
-          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Photos are shrunk to {{ Math.round(maxPictureBytes / 1024) }} KB or less. They’re saved on this device right away and sent to the spreadsheet when it syncs.</p>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{{ t('form.picturesHint', { kb: Math.round(maxPictureBytes / 1024) }) }}</p>
         </div>
 
         <button type="submit" class="btn-primary w-full" :disabled="!!busy || processingPictures">
-          <i class="bi bi-check-lg"></i> {{ form.id ? 'Save Changes' : 'Add RV' }}
+          <i class="bi bi-check-lg"></i> {{ form.id ? t('common.saveChanges') : t('form.addRv') }}
         </button>
         <button v-if="form.id" type="button" class="btn-danger w-full" @click="removePerson" :disabled="!!busy">
-          <i class="bi bi-trash"></i> Delete {{ form.name || 'this person' }}
+          <i class="bi bi-trash"></i> {{ t('form.delete', { name: form.name || t('form.thisPerson') }) }}
         </button>
       </form>
     </main>
@@ -431,48 +497,48 @@
       <form class="space-y-4" @submit.prevent="saveVisitForm">
         <div class="card space-y-4 p-4">
           <div>
-            <label class="label" for="visitCreatedAt">Visit started</label>
+            <label class="label" for="visitCreatedAt">{{ t('visit.started') }}</label>
             <input id="visitCreatedAt" v-model="visitForm.createdAt" type="datetime-local" class="input" required>
           </div>
           <div>
-            <h3 class="label">Notes</h3>
-            <md-editor v-model="visitForm.notes" :rows="8" placeholder="What did you discuss? What will you talk about next time?"></md-editor>
+            <h3 class="label">{{ t('visit.notes') }}</h3>
+            <md-editor v-model="visitForm.notes" :rows="8" :placeholder="t('visit.notesPlaceholder')"></md-editor>
             <p v-if="!visitForm.id" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              <i class="bi bi-cloud-check"></i> A draft is kept on this device until you save.
+              <i class="bi bi-cloud-check"></i> {{ t('visit.draftHint') }}
             </p>
           </div>
         </div>
 
         <label v-if="!visitForm.id" class="card flex items-center justify-between gap-3 p-4">
           <span>
-            <span class="block font-medium">Bible study</span>
+            <span class="block font-medium">{{ t('visit.bibleStudy') }}</span>
             <span class="block text-xs text-slate-500 dark:text-slate-400">
-              {{ visitStudyCounted ? 'Already counted in ' + monthLabel(visitMonth) + '.' : 'Count ' + (current ? current.name : 'them') + ' as a study in ' + monthLabel(visitMonth) + '.' }}
+              {{ visitStudyCounted ? t('visit.alreadyCounted', { month: monthLabel(visitMonth) }) : t('visit.countAs', { name: current ? current.name : '', month: monthLabel(visitMonth) }) }}
             </span>
           </span>
           <input type="checkbox" v-model="visitForm.countStudy" :disabled="visitStudyCounted" class="h-6 w-6 rounded accent-indigo-600">
         </label>
 
         <div v-if="visitForm.updateReturnAt" class="card space-y-2 p-4">
-          <label class="label" for="visitReturnAt">Next return visit (optional)</label>
+          <label class="label" for="visitReturnAt">{{ t('visit.nextReturn') }}</label>
           <input id="visitReturnAt" v-model="visitForm.returnAt" type="datetime-local" class="input">
           <div class="flex flex-wrap gap-2">
             <button v-for="weeks in [1, 2, 4]" :key="weeks" type="button" class="chip chip-off" @click="setReturnInWeeks(weeks)">
-              +{{ weeks }} {{ weeks === 1 ? 'week' : 'weeks' }}
+              {{ t('visit.plusWeeks', { count: weeks }) }}
             </button>
-            <button v-if="visitForm.returnAt" type="button" class="chip chip-off" @click="visitForm.returnAt = ''">Clear</button>
+            <button v-if="visitForm.returnAt" type="button" class="chip chip-off" @click="visitForm.returnAt = ''">{{ t('common.clear') }}</button>
           </div>
-          <p class="text-xs text-slate-500 dark:text-slate-400">Saved as {{ current ? current.name : 'this person' }}'s Return At. Leave it blank to clear it.</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('visit.returnHint', { name: current ? current.name : '' }) }}</p>
         </div>
 
         <button type="submit" class="btn-primary w-full" :disabled="!!busy">
-          <i class="bi bi-check-lg"></i> {{ visitForm.id ? 'Save Changes' : 'Save Visit' }}
+          <i class="bi bi-check-lg"></i> {{ visitForm.id ? t('common.saveChanges') : t('visit.save') }}
         </button>
         <button v-if="visitForm.id" type="button" class="btn-danger w-full" @click="removeVisit" :disabled="!!busy">
-          <i class="bi bi-trash"></i> Delete Visit
+          <i class="bi bi-trash"></i> {{ t('visit.delete') }}
         </button>
         <button v-else-if="hasVisitDraft" type="button" class="btn w-full" @click="discardVisitDraft" :disabled="!!busy">
-          Discard Draft
+          {{ t('visit.discardDraft') }}
         </button>
       </form>
     </main>
@@ -480,32 +546,32 @@
     <!-- Monthly report -->
     <main v-else-if="view === 'report'" class="mx-auto max-w-xl space-y-3 p-3">
       <div class="flex items-center gap-2">
-        <button class="icon-btn" @click="stepMonth(-1)" aria-label="Previous month"><i class="bi bi-chevron-left"></i></button>
+        <button class="icon-btn" @click="stepMonth(-1)" :aria-label="t('report.previousMonth')"><i class="bi bi-chevron-left"></i></button>
         <h2 class="flex-1 text-center text-lg font-semibold">{{ monthLabel(reportMonth) }}</h2>
-        <button class="icon-btn" @click="stepMonth(1)" :disabled="reportMonth >= monthKey()" aria-label="Next month"><i class="bi bi-chevron-right"></i></button>
+        <button class="icon-btn" @click="stepMonth(1)" :disabled="reportMonth >= monthKey()" :aria-label="t('report.nextMonth')"><i class="bi bi-chevron-right"></i></button>
       </div>
 
       <section class="card space-y-3 p-4">
         <div class="flex items-end justify-between gap-3">
           <div>
-            <h3 class="label">Hours</h3>
+            <h3 class="label">{{ t('report.hours') }}</h3>
             <p class="text-3xl font-semibold tabular-nums">{{ summary.service.liveHours }}</p>
           </div>
           <div class="text-right text-xs text-slate-500 dark:text-slate-400">
-            <p>{{ formatMinutes(summary.service.minutes) }} logged</p>
-            <p v-if="summary.service.carriedIn">+ {{ summary.service.carriedIn }} min from {{ monthLabel(addMonths(reportMonth, -1)) }}</p>
-            <p v-if="summary.service.liveCarriedOut">{{ summary.service.liveCarriedOut }} min carry to {{ monthLabel(addMonths(reportMonth, 1)) }}</p>
+            <p>{{ t('report.logged', { time: formatMinutes(summary.service.minutes) }) }}</p>
+            <p v-if="summary.service.carriedIn">{{ t('report.carriedIn', { minutes: summary.service.carriedIn, month: monthLabel(addMonths(reportMonth, -1)) }) }}</p>
+            <p v-if="summary.service.liveCarriedOut">{{ t('report.carryOut', { minutes: summary.service.liveCarriedOut, month: monthLabel(addMonths(reportMonth, 1)) }) }}</p>
           </div>
         </div>
         <div v-if="summary.credit.minutes || summary.credit.carriedIn" class="flex items-end justify-between gap-3 border-t border-slate-200 pt-3 dark:border-slate-700">
           <div>
-            <h3 class="label">Credit hours</h3>
+            <h3 class="label">{{ t('report.creditHours') }}</h3>
             <p class="text-xl font-semibold tabular-nums">{{ summary.credit.liveHours }}</p>
           </div>
           <div class="text-right text-xs text-slate-500 dark:text-slate-400">
-            <p>{{ formatMinutes(summary.credit.minutes) }} logged</p>
-            <p v-if="summary.credit.carriedIn">+ {{ summary.credit.carriedIn }} min carried in</p>
-            <p v-if="summary.credit.liveCarriedOut">{{ summary.credit.liveCarriedOut }} min carry forward</p>
+            <p>{{ t('report.logged', { time: formatMinutes(summary.credit.minutes) }) }}</p>
+            <p v-if="summary.credit.carriedIn">{{ t('report.creditCarriedIn', { minutes: summary.credit.carriedIn }) }}</p>
+            <p v-if="summary.credit.liveCarriedOut">{{ t('report.creditCarryOut', { minutes: summary.credit.liveCarriedOut }) }}</p>
           </div>
         </div>
         <div class="border-t border-slate-200 pt-3 dark:border-slate-700">
@@ -516,7 +582,7 @@
             <template v-for="(cell, i) in calendar" :key="i">
               <span v-if="!cell"></span>
               <button v-else type="button" @click="selectedDay = cell.day" :disabled="cell.day > today"
-                :aria-label="dayLabel(cell.day) + (cell.minutes ? ', ' + formatMinutes(cell.minutes) : '') + (cell.creditMinutes ? ', ' + formatMinutes(cell.creditMinutes) + ' credit' : '')"
+                :aria-label="dayLabel(cell.day) + (cell.minutes ? ', ' + formatMinutes(cell.minutes) : '') + (cell.creditMinutes ? ', ' + t('report.creditTime', { time: formatMinutes(cell.creditMinutes) }) : '')"
                 :aria-pressed="cell.day === selectedDay"
                 class="relative flex h-12 flex-col items-center justify-center rounded-lg text-sm leading-tight disabled:opacity-30"
                 :class="[
@@ -530,8 +596,8 @@
             </template>
           </div>
           <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            <span class="inline-block h-2 w-2 rounded-sm bg-emerald-400"></span> Ministry
-            <span class="ml-2 inline-block h-2 w-2 rounded-sm bg-sky-400"></span> Credit
+            <span class="inline-block h-2 w-2 rounded-sm bg-emerald-400"></span> {{ t('time.ministry') }}
+            <span class="ml-2 inline-block h-2 w-2 rounded-sm bg-sky-400"></span> {{ t('time.credit') }}
           </p>
         </div>
 
@@ -543,40 +609,40 @@
                 {{ formatMinutes(selectedDayEntries.reduce((sum, entry) => sum + entry.minutes, 0)) }}
               </p>
             </div>
-            <button class="btn shrink-0" @click="newTimeEntry()" :aria-label="'Add time on ' + dayLabel(selectedDay)">
-              <i class="bi bi-plus-lg"></i> Add
+            <button class="btn shrink-0" @click="newTimeEntry()" :aria-label="t('report.addTimeOn', { day: dayLabel(selectedDay) })">
+              <i class="bi bi-plus-lg"></i> {{ t('common.add') }}
             </button>
           </div>
           <ul v-if="selectedDayEntries.length" class="divide-y divide-slate-200 dark:divide-slate-700">
             <li v-for="entry in selectedDayEntries" :key="entry.id">
               <button class="flex w-full items-center gap-3 py-2 text-left" @click="editTimeEntry(entry)">
-                <span class="min-w-0 flex-1 truncate text-sm" :class="entry.note ? '' : 'text-slate-400'">{{ entry.note || 'No note' }}</span>
-                <span v-if="entry.kind === 'credit'" class="badge badge-later shrink-0">Credit</span>
+                <span class="min-w-0 flex-1 truncate text-sm" :class="entry.note ? '' : 'text-slate-400'">{{ entry.note || t('time.noNote') }}</span>
+                <span v-if="entry.kind === 'credit'" class="badge badge-later shrink-0">{{ t('time.credit') }}</span>
                 <span class="shrink-0 text-sm font-medium tabular-nums">{{ formatMinutes(entry.minutes) }}</span>
                 <i class="bi bi-chevron-right text-xs text-slate-400"></i>
               </button>
             </li>
           </ul>
-          <p v-else class="text-sm text-slate-500 dark:text-slate-400">No time logged.</p>
+          <p v-else class="text-sm text-slate-500 dark:text-slate-400">{{ t('report.noTime') }}</p>
         </div>
 
         <div class="flex gap-2">
-          <button v-if="!selectedDay" class="btn flex-1" @click="newTimeEntry()"><i class="bi bi-plus-lg"></i> Add time</button>
-          <button v-if="!timer" class="btn flex-1" @click="startTimer"><i class="bi bi-stopwatch"></i> Start timer</button>
-          <button v-else class="btn flex-1" @click="stopTimer"><i class="bi bi-stop-fill"></i> Stop {{ timerElapsed }}</button>
+          <button v-if="!selectedDay" class="btn flex-1" @click="newTimeEntry()"><i class="bi bi-plus-lg"></i> {{ t('report.addTime') }}</button>
+          <button v-if="!timer" class="btn flex-1" @click="startTimer"><i class="bi bi-stopwatch"></i> {{ t('timer.start') }}</button>
+          <button v-else class="btn flex-1" @click="stopTimer"><i class="bi bi-stop-fill"></i> {{ t('timer.stop') }} {{ timerElapsed }}</button>
         </div>
       </section>
 
       <section class="card space-y-3 p-4">
         <div class="flex items-baseline justify-between">
-          <h3 class="label">Bible studies</h3>
+          <h3 class="label">{{ t('report.bibleStudies') }}</h3>
           <span class="text-xl font-semibold tabular-nums">{{ summary.studies.length }}</span>
         </div>
         <ul v-if="summary.studies.length" class="space-y-1">
           <li v-for="study in summary.studies" :key="study.id" class="flex items-center gap-2 text-sm">
             <i class="bi" :class="study.personId ? 'bi-person' : 'bi-person-plus'"></i>
             <span class="flex-1">{{ studyDisplayName(study) }}</span>
-            <button class="icon-btn h-8 w-8 text-base" @click="removeStudy(study)" :aria-label="'Remove ' + studyDisplayName(study)"><i class="bi bi-x-lg"></i></button>
+            <button class="icon-btn h-8 w-8 text-base" @click="removeStudy(study)" :aria-label="t('common.removeName', { name: studyDisplayName(study) })"><i class="bi bi-x-lg"></i></button>
           </li>
         </ul>
         <div v-if="studySuggestions.length" class="flex flex-wrap gap-2">
@@ -584,63 +650,61 @@
             <i class="bi bi-plus"></i> {{ person.name }}
           </button>
         </div>
-        <select v-if="studyCandidates.length" v-model="studyPersonId" class="input" aria-label="Add an RV as a study"
+        <select v-if="studyCandidates.length" v-model="studyPersonId" class="input" :aria-label="t('study.addRv')"
           @change="studyPersonId && addStudyPerson(studyCandidates.find(p => p.id === studyPersonId))">
-          <option value="">Add an RV…</option>
+          <option value="">{{ t('study.addRv') }}</option>
           <option v-for="person in studyCandidates" :key="person.id" :value="person.id">{{ person.name }}</option>
         </select>
         <div class="flex gap-2">
-          <input v-model="studyName" class="input flex-1" placeholder="Someone else’s name" aria-label="Another study’s name" @keydown.enter.prevent="addStudyName">
-          <button class="btn" @click="addStudyName" :disabled="!studyName.trim()">Add</button>
+          <input v-model="studyName" class="input flex-1" :placeholder="t('study.otherName')" :aria-label="t('study.otherName')" @keydown.enter.prevent="addStudyName">
+          <button class="btn" @click="addStudyName" :disabled="!studyName.trim()" :aria-label="t('study.addOther')">{{ t('common.add') }}</button>
         </div>
       </section>
 
       <section class="card space-y-4 p-4">
         <div>
-          <h3 class="label">Shared in the ministry</h3>
+          <h3 class="label">{{ t('report.shared') }}</h3>
           <div class="flex gap-2">
-            <button v-for="option in [{ value: '', label: 'Automatic' }, { value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]" :key="option.value"
+            <button v-for="option in [{ value: '', label: t('report.automatic') }, { value: 'yes', label: t('common.yes') }, { value: 'no', label: t('common.no') }]" :key="option.value"
               class="chip" :class="(summary.report ? summary.report.shared : '') === option.value ? 'chip-on' : 'chip-off'" @click="setShared(option.value)">
               {{ option.label }}
             </button>
           </div>
           <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            {{ summary.shared ? 'Yes' : 'No' }}<template v-if="!summary.report || !summary.report.shared"> (automatic: {{ summary.sharedAuto ? 'you logged time, a visit, or a study this month' : 'nothing logged this month yet' }})</template>
+            {{ summary.shared ? t('common.yes') : t('common.no') }}<template v-if="!summary.report || !summary.report.shared"> ({{ summary.sharedAuto ? t('report.autoYes') : t('report.autoNo') }})</template>
           </p>
         </div>
         <div>
-          <label class="label" for="reportComments">Comments</label>
-          <textarea id="reportComments" v-model="reportComments" class="input" rows="2" @blur="saveComments" placeholder="Optional"></textarea>
+          <label class="label" for="reportComments">{{ t('report.comments') }}</label>
+          <textarea id="reportComments" v-model="reportComments" class="input" rows="2" @blur="saveComments" :placeholder="t('common.optional')"></textarea>
         </div>
         <div>
-          <label class="label" for="reportName">Your name on reports</label>
-          <input id="reportName" :value="reportName" class="input" placeholder="Optional" autocomplete="name" @change="saveReportName">
+          <label class="label" for="reportName">{{ t('report.yourName') }}</label>
+          <input id="reportName" :value="reportName" class="input" :placeholder="t('common.optional')" autocomplete="name" @change="saveReportName">
         </div>
       </section>
 
       <section class="card space-y-3 p-4">
         <div class="flex items-center justify-between">
-          <h3 class="label">Report</h3>
-          <span v-if="summary.sent" class="badge badge-study"><i class="bi bi-check2"></i> Sent {{ shortDate(summary.report.sentAt) }}</span>
+          <h3 class="label">{{ t('report.report') }}</h3>
+          <span v-if="summary.sent" class="badge badge-study"><i class="bi bi-check2"></i> {{ t('report.sentOn', { date: shortDate(summary.report.sentAt) }) }}</span>
         </div>
         <pre class="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 font-sans text-sm dark:bg-slate-900">{{ currentReportText }}</pre>
-        <p v-if="changedSinceSent" class="text-xs text-amber-700 dark:text-amber-300">
-          This has changed since it was sent. What was sent is still what counts toward carrying minutes into next month until you send it again.
-        </p>
+        <p v-if="changedSinceSent" class="text-xs text-amber-700 dark:text-amber-300">{{ t('report.changedSinceSent') }}</p>
         <button class="btn-primary w-full" @click="sendReport">
-          <i class="bi bi-send"></i> {{ summary.sent ? 'Send again' : 'Send report' }}
+          <i class="bi bi-send"></i> {{ summary.sent ? t('report.sendAgain') : t('report.send') }}
         </button>
       </section>
 
       <section class="space-y-2">
-        <h2 class="section-title">Months</h2>
+        <h2 class="section-title">{{ t('report.months') }}</h2>
         <ul class="card divide-y divide-slate-200 dark:divide-slate-700">
           <li v-for="item in reportHistory" :key="item.month">
             <button class="flex w-full items-center gap-3 px-4 py-3 text-left" :class="item.month === reportMonth ? 'bg-indigo-50 dark:bg-indigo-950' : ''" @click="openReport(item.month)">
               <span class="flex-1 font-medium">{{ item.label }}</span>
-              <span class="text-sm text-slate-500 dark:text-slate-400">{{ item.hours }} h &middot; {{ item.studies }} {{ item.studies === 1 ? 'study' : 'studies' }}</span>
-              <i v-if="item.sent" class="bi bi-check-circle-fill text-emerald-600 dark:text-emerald-400" aria-label="Sent"></i>
-              <i v-else class="bi bi-circle text-slate-300 dark:text-slate-600" aria-label="Not sent"></i>
+              <span class="text-sm text-slate-500 dark:text-slate-400">{{ item.hours }} h &middot; {{ t('report.studyCount', { count: item.studies }) }}</span>
+              <i v-if="item.sent" class="bi bi-check-circle-fill text-emerald-600 dark:text-emerald-400" :aria-label="t('report.sent')"></i>
+              <i v-else class="bi bi-circle text-slate-300 dark:text-slate-600" :aria-label="t('report.notSent')"></i>
             </button>
           </li>
         </ul>
@@ -652,15 +716,15 @@
       <form class="space-y-4" @submit.prevent="saveTimeForm">
         <div class="card space-y-4 p-4">
           <div>
-            <label class="label" for="timeDate">Date</label>
+            <label class="label" for="timeDate">{{ t('time.date') }}</label>
             <input id="timeDate" v-model="timeForm.date" type="date" class="input" required>
           </div>
           <div>
-            <span class="label">Time</span>
+            <span class="label">{{ t('time.time') }}</span>
             <div class="flex items-center gap-2">
-              <input v-model.number="timeForm.hours" type="number" min="0" max="24" inputmode="numeric" class="input w-20" aria-label="Hours">
+              <input v-model.number="timeForm.hours" type="number" min="0" max="24" inputmode="numeric" class="input w-20" :aria-label="t('time.hours')">
               <span class="text-sm">h</span>
-              <input v-model.number="timeForm.minutes" type="number" min="0" max="59" inputmode="numeric" class="input w-20" aria-label="Minutes">
+              <input v-model.number="timeForm.minutes" type="number" min="0" max="59" inputmode="numeric" class="input w-20" :aria-label="t('time.minutes')">
               <span class="text-sm">min</span>
             </div>
             <div class="mt-2 flex flex-wrap gap-2">
@@ -670,27 +734,27 @@
             </div>
           </div>
           <div>
-            <span class="label">Kind</span>
+            <span class="label">{{ t('time.kind') }}</span>
             <div class="flex gap-2">
-              <button type="button" class="chip" :class="timeForm.kind === 'service' ? 'chip-on' : 'chip-off'" @click="timeForm.kind = 'service'">Ministry</button>
-              <button type="button" class="chip" :class="timeForm.kind === 'credit' ? 'chip-on' : 'chip-off'" @click="timeForm.kind = 'credit'">Credit</button>
+              <button type="button" class="chip" :class="timeForm.kind === 'service' ? 'chip-on' : 'chip-off'" @click="timeForm.kind = 'service'">{{ t('time.ministry') }}</button>
+              <button type="button" class="chip" :class="timeForm.kind === 'credit' ? 'chip-on' : 'chip-off'" @click="timeForm.kind = 'credit'">{{ t('time.credit') }}</button>
             </div>
           </div>
           <div>
-            <label class="label" for="timeNote">Note</label>
-            <input id="timeNote" v-model="timeForm.note" class="input" placeholder="Optional" autocomplete="off">
+            <label class="label" for="timeNote">{{ t('time.note') }}</label>
+            <input id="timeNote" v-model="timeForm.note" class="input" :placeholder="t('common.optional')" autocomplete="off">
           </div>
         </div>
-        <button type="submit" class="btn-primary w-full"><i class="bi bi-check-lg"></i> {{ timeForm.id ? 'Save Changes' : 'Save Time' }}</button>
-        <button v-if="timeForm.id" type="button" class="btn-danger w-full" @click="removeTimeEntry"><i class="bi bi-trash"></i> Delete</button>
+        <button type="submit" class="btn-primary w-full"><i class="bi bi-check-lg"></i> {{ timeForm.id ? t('common.saveChanges') : t('time.save') }}</button>
+        <button v-if="timeForm.id" type="button" class="btn-danger w-full" @click="removeTimeEntry"><i class="bi bi-trash"></i> {{ t('common.delete') }}</button>
       </form>
     </main>
 
     <!-- QR code scanner -->
     <div v-if="scanner.open" class="fixed inset-0 z-50 flex flex-col bg-black text-white">
       <div class="flex items-center justify-between p-2">
-        <span class="px-2 text-sm font-medium">Scan QR code</span>
-        <button class="icon-btn text-white" @click="closeScanner" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+        <span class="px-2 text-sm font-medium">{{ t('scan.button') }}</span>
+        <button class="icon-btn text-white" @click="closeScanner" :aria-label="t('common.close')"><i class="bi bi-x-lg"></i></button>
       </div>
       <div class="relative flex-1 overflow-hidden">
         <video ref="scannerVideo" class="absolute inset-0 h-full w-full object-cover" playsinline muted></video>
@@ -705,13 +769,13 @@
     <div v-if="lightbox" class="fixed inset-0 z-50 flex flex-col bg-black/95" @click.self="lightbox = null">
       <div class="flex items-center justify-between p-2 text-white">
         <span class="px-2 text-sm">{{ lightbox.index + 1 }} / {{ lightbox.ids.length }}</span>
-        <button class="icon-btn text-white" @click="lightbox = null" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+        <button class="icon-btn text-white" @click="lightbox = null" :aria-label="t('common.close')"><i class="bi bi-x-lg"></i></button>
       </div>
       <div class="relative flex flex-1 items-center justify-center overflow-hidden" @click.self="lightbox = null">
         <img v-if="pictureCache[lightbox.ids[lightbox.index]]" :src="pictureCache[lightbox.ids[lightbox.index]]" class="max-h-full max-w-full object-contain" alt="">
         <i v-else class="bi bi-hourglass-split text-3xl text-white"></i>
-        <button v-if="lightbox.ids.length > 1" class="icon-btn absolute left-2 bg-black/40 text-white" @click="stepLightbox(-1)" aria-label="Previous"><i class="bi bi-chevron-left"></i></button>
-        <button v-if="lightbox.ids.length > 1" class="icon-btn absolute right-2 bg-black/40 text-white" @click="stepLightbox(1)" aria-label="Next"><i class="bi bi-chevron-right"></i></button>
+        <button v-if="lightbox.ids.length > 1" class="icon-btn absolute left-2 bg-black/40 text-white" @click="stepLightbox(-1)" :aria-label="t('common.previous')"><i class="bi bi-chevron-left"></i></button>
+        <button v-if="lightbox.ids.length > 1" class="icon-btn absolute right-2 bg-black/40 text-white" @click="stepLightbox(1)" :aria-label="t('common.next')"><i class="bi bi-chevron-right"></i></button>
       </div>
     </div>
 
@@ -719,7 +783,7 @@
     <div v-if="toast" class="fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
       <div class="flex max-w-md items-start gap-3 rounded-xl px-4 py-3 text-sm text-white shadow-lg" :class="toast.error ? 'bg-red-600' : 'bg-slate-800'">
         <span class="flex-1">{{ toast.message }}</span>
-        <button @click="toast = null" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+        <button @click="toast = null" :aria-label="t('common.dismiss')"><i class="bi bi-x-lg"></i></button>
       </div>
     </div>
   </div>

@@ -82,3 +82,23 @@ test('the backend code does not leak into the loader', () => {
   // Code.gs's own doPost stays inside the loader's function.
   assert.match(String(backend.context.doPost), /backend_\(\)/);
 });
+
+test('the menu comes from the saved backend, so new items need no new loader', () => {
+  const { backend } = loaderWith(ok);
+  // Before anything is saved, the menu still works.
+  backend.context.onOpen();
+  assert.deepEqual(backend.ui.menus[0].items.filter(Boolean).map(i => i.functionName),
+    ['showConnectDialog', 'resetKey', 'setUpSheets', 'updateNow']);
+
+  post(backend, { key: KEY, action: 'info' });
+  newExecution(backend);
+  backend.context.onOpen();
+  const items = backend.ui.menus[1].items.filter(Boolean);
+  assert.deepEqual(items.map(i => i.label), ['Connect app', 'Reset key', 'Set up sheets', 'RV Notes on GitHub', 'Update now']);
+  const github = items.find(i => i.label === 'RV Notes on GitHub');
+  newExecution(backend);
+  backend.context[github.functionName]();
+  assert.match(backend.ui.dialogs[0].html, /github\.com\/westc\/rv-notes/);
+  // onOpen never downloads.
+  assert.equal(backend.fetches.length, 1);
+});

@@ -1,6 +1,7 @@
 // Helpers shared by the app's modules.
 import { marked } from '../vendor/marked.esm.js';
 import DOMPurify from '../vendor/purify.es.mjs';
+import { currentLocale } from './locale.js';
 
 export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const PERIODS = ['Morning', 'Afternoon', 'Evening'];
@@ -31,6 +32,38 @@ export const storage = {
     try { localStorage.removeItem(key); } catch (e) {}
   }
 };
+
+// Letters (in any language), numbers, and hyphens. Must match TAG_PATTERN in
+// apps-script/Code.gs.
+export const TAG_PATTERN = /^[\p{L}\p{M}\p{N}]+(?:-[\p{L}\p{M}\p{N}]+)*$/u;
+export const MAX_TAG_LENGTH = 40;
+
+/**
+ * Turns typed text into a tag: spaces become hyphens, other punctuation is
+ * dropped, and hyphens are never doubled or at either end.
+ */
+export function cleanTag(text) {
+  return String(text || '')
+    .normalize('NFC')
+    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{M}\p{N}-]/gu, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, MAX_TAG_LENGTH);
+}
+
+/**
+ * Markdown as plain text, for PDFs and previews. List items start with "- ".
+ */
+export function markdownToText(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.innerHTML = markdown(text);
+  div.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+  div.querySelectorAll('li').forEach(li => li.prepend('- '));
+  div.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, tr').forEach(el => el.append('\n'));
+  return div.textContent.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
 
 export function uuid() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -72,25 +105,28 @@ export function formatDateTime(iso) {
   const date = new Date(iso);
   const options = { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
   if (date.getFullYear() !== new Date().getFullYear()) options.year = 'numeric';
-  return date.toLocaleString(undefined, options);
+  return date.toLocaleString(currentLocale, options);
 }
 
 export function shortDate(iso) {
   const date = new Date(iso);
   const options = { month: 'short', day: 'numeric' };
   if (date.getFullYear() !== new Date().getFullYear()) options.year = '2-digit';
-  return date.toLocaleDateString(undefined, options);
+  return date.toLocaleDateString(currentLocale, options);
 }
 
-const relativeFormat = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+const relativeFormats = {};
 // now is passed in by the UI so the text updates as time passes.
 export function relative(iso, now = new Date()) {
+  const relativeFormat = relativeFormats[currentLocale] ||
+    (relativeFormats[currentLocale] = new Intl.RelativeTimeFormat(currentLocale, { numeric: 'auto' }));
   const date = new Date(iso);
   const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const days = Math.round((startOfDay(date) - startOfDay(now)) / 86400000);
   if (Math.abs(days) < 1) {
     const minutes = Math.round((date - now) / 60000);
-    if (minutes === 0) return 'just now';
+    // "now", "ahora", "agora"
+    if (minutes === 0) return relativeFormat.format(0, 'second');
     if (Math.abs(minutes) < 60) return relativeFormat.format(minutes, 'minute');
     return relativeFormat.format(Math.round(minutes / 60), 'hour');
   }

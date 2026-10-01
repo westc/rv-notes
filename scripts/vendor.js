@@ -12,7 +12,9 @@ const files = {
   'bootstrap-icons/font/bootstrap-icons.min.css': 'bootstrap-icons/bootstrap-icons.min.css',
   'bootstrap-icons/font/fonts': 'bootstrap-icons/fonts',
   // Loaded only when scanning a QR code on browsers without BarcodeDetector.
-  'jsqr/dist/jsQR.js': 'jsQR.js'
+  'jsqr/dist/jsQR.js': 'jsQR.js',
+  // Loaded only when sharing an RV as a PDF.
+  'jspdf/dist/jspdf.umd.min.js': 'jspdf.umd.min.js'
 };
 
 rmSync('vendor', { recursive: true, force: true });

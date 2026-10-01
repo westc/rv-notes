@@ -3,6 +3,8 @@
 //
 // Months are "yyyy-mm" and days are "yyyy-mm-dd", both in local time.
 
+import { currentLocale } from './locale.js';
+
 const pad = n => String(n).padStart(2, '0');
 
 export function dayKey(date = new Date()) {
@@ -21,7 +23,7 @@ export function addMonths(month, count) {
 
 export function monthLabel(month) {
   const [year, m] = month.split('-').map(Number);
-  return new Date(year, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  return new Date(year, m - 1, 1).toLocaleDateString(currentLocale, { month: 'long', year: 'numeric' });
 }
 
 export function reportId(month) {
@@ -120,17 +122,30 @@ export function summarize(data, month) {
   };
 }
 
+const ENGLISH_LABELS = {
+  'report.text.title': 'Ministry report for {month}',
+  'report.text.name': 'Name',
+  'report.text.shared': 'Shared in the ministry',
+  'report.text.studies': 'Bible studies',
+  'report.text.hours': 'Hours',
+  'report.text.credit': 'Credit hours',
+  'report.text.comments': 'Comments',
+  'common.yes': 'Yes',
+  'common.no': 'No'
+};
+const englishText = (key, params = {}) => ENGLISH_LABELS[key].replace(/\{(\w+)\}/g, (m, name) => params[name]);
+
 /**
- * The text that's shared.
+ * The text that's shared. t translates the labels (English by default).
  */
-export function reportText(summary, { name = '' } = {}) {
-  const lines = [`Ministry report for ${monthLabel(summary.month)}`];
-  if (name.trim()) lines.push(`Name: ${name.trim()}`);
-  lines.push(`Shared in the ministry: ${summary.shared ? 'Yes' : 'No'}`);
-  lines.push(`Bible studies: ${summary.studies.length}`);
-  lines.push(`Hours: ${summary.service.liveHours}`);
-  if (summary.credit.liveHours) lines.push(`Credit hours: ${summary.credit.liveHours}`);
-  if (summary.comments.trim()) lines.push(`Comments: ${summary.comments.trim()}`);
+export function reportText(summary, { name = '', t = englishText } = {}) {
+  const lines = [t('report.text.title', { month: monthLabel(summary.month) })];
+  if (name.trim()) lines.push(`${t('report.text.name')}: ${name.trim()}`);
+  lines.push(`${t('report.text.shared')}: ${summary.shared ? t('common.yes') : t('common.no')}`);
+  lines.push(`${t('report.text.studies')}: ${summary.studies.length}`);
+  lines.push(`${t('report.text.hours')}: ${summary.service.liveHours}`);
+  if (summary.credit.liveHours) lines.push(`${t('report.text.credit')}: ${summary.credit.liveHours}`);
+  if (summary.comments.trim()) lines.push(`${t('report.text.comments')}: ${summary.comments.trim()}`);
   return lines.join('\n');
 }
 
@@ -155,7 +170,7 @@ export function clockMinutes(minutes) {
  * The first day of the week for the browser's language, 0 for Sunday to 6
  * for Saturday. Falls back to Sunday where browsers can't tell.
  */
-export function weekStart(language = typeof navigator === 'undefined' ? 'en-US' : navigator.language) {
+export function weekStart(language = currentLocale || (typeof navigator === 'undefined' ? 'en-US' : navigator.language)) {
   try {
     const locale = new Intl.Locale(language);
     const info = locale.getWeekInfo ? locale.getWeekInfo() : locale.weekInfo;
@@ -169,7 +184,7 @@ export function weekStart(language = typeof navigator === 'undefined' ? 'en-US' 
 export function weekdayLabels(start = 0) {
   // January 1, 2023 was a Sunday.
   return Array.from({ length: 7 }, (_, i) =>
-    new Date(2023, 0, 1 + (start + i) % 7).toLocaleDateString(undefined, { weekday: 'narrow' }));
+    new Date(2023, 0, 1 + (start + i) % 7).toLocaleDateString(currentLocale, { weekday: 'narrow' }));
 }
 
 /**

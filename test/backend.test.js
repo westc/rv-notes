@@ -263,3 +263,39 @@ test('rejects invalid time entries, studies, and reports', () => {
   });
   assert.equal(result.rejected.length, 6);
 });
+
+test('tags allow letters in any language, numbers, and hyphens, and drop repeats', () => {
+  const backend = loadBackend();
+  const result = call(backend, 'sync', { since: '', changes: [
+    putPerson(P1, { tags: ['Español', 'follow-up', 'FOLLOW-UP', 'año-2026', 'São-Paulo', ' trimmed '] })
+  ] });
+  assert.deepEqual(result.rejected, []);
+  assert.deepEqual(result.people[0].tags, ['Español', 'follow-up', 'año-2026', 'São-Paulo', 'trimmed']);
+  assert.equal(backend.spreadsheet.getSheetByName('RVs').rows[1][backend.spreadsheet.getSheetByName('RVs').rows[0].indexOf('Tags')],
+    'Español, follow-up, año-2026, São-Paulo, trimmed');
+});
+
+test('tags with punctuation are rejected', () => {
+  const backend = loadBackend();
+  for (const tag of ['a,b', 'end.', "it's", 'under_score', 'two words', '-lead', 'trail-', 'a--b', 'q?']) {
+    const result = call(backend, 'sync', { since: '', changes: [putPerson(P1, { tags: [tag] })] });
+    assert.equal(result.rejected.length, 1, tag);
+  }
+});
+
+test('the spreadsheet menu and dialogs follow the user’s language', () => {
+  for (const [locale, connect, github] of [['en', 'Connect app', 'RV Notes on GitHub'], ['es_419', 'Conectar la app', 'RV Notes en GitHub'], ['pt_BR', 'Conectar o app', 'RV Notes no GitHub']]) {
+    const backend = loadBackend({ locale });
+    backend.context.onOpen();
+    const items = backend.ui.menus[0].items.filter(Boolean);
+    assert.equal(items[0].label, connect);
+    assert.deepEqual(items.at(-1), { label: github, functionName: 'openGitHub' });
+  }
+  const backend = loadBackend({ locale: 'es' });
+  backend.context.showConnectDialog();
+  assert.equal(backend.ui.dialogs[0].title, 'Conectar la app RV Notes');
+  assert.ok(!/\{\{(?!DATA)/.test(backend.ui.dialogs[0].html), 'every placeholder is filled');
+  assert.match(backend.ui.dialogs[0].html, /Escanear código QR/);
+  backend.context.openGitHub();
+  assert.match(backend.ui.dialogs[1].html, /https:\/\/github\.com\/westc\/rv-notes/);
+});

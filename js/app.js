@@ -1,6 +1,8 @@
 import { createApp, ref, reactive, computed, watch, nextTick } from '../vendor/vue.esm-browser.prod.js';
 import * as L from '../vendor/leaflet/leaflet-src.esm.js';
 import { callApi } from './api.js';
+import { i18n, LANGUAGE_NAMES, setLanguage, t } from './i18n.js';
+import { calendarFile, googleCalendarUrl, pdfFileName, personPdf, shareOrDownload } from './share.js';
 import { createStore } from './store.js';
 import {
   addMonths, calendarCells, clockMinutes, dayKey, formatMinutes, monthKey, monthLabel, reportId, reportMonths,
@@ -10,7 +12,7 @@ import { startScanner } from './scanner.js';
 import {
   DAYS, PERIODS, MAX_PICTURE_BYTES, markdown, storage, decodeBase64Url, toLocalInput, fromLocalInput,
   formatDateTime, shortDate, relative, endOfToday, returnBadgeClass, firstLine, parseCoords, formatCoords,
-  mapQuery, mapsUrl, directionsUrl, shrinkImage, uuid, nowIso
+  mapQuery, mapsUrl, directionsUrl, shrinkImage, uuid, nowIso, cleanTag, markdownToText
 } from './util.js';
 
 const isLocalDev = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -29,7 +31,7 @@ function addTiles(map) {
 }
 
 function changesWaiting(count) {
-  return `${count} ${count === 1 ? 'change' : 'changes'} waiting`;
+  return t('sync.waiting', { count });
 }
 
 function isBackendUrl(url) {
@@ -69,21 +71,21 @@ const MdEditor = {
   },
   emits: ['update:modelValue'],
   setup() {
-    return { preview: ref(false), markdown };
+    return { preview: ref(false), markdown, t };
   },
   template: `
     <div class="overflow-hidden rounded-lg ring-1 ring-slate-300 focus-within:ring-2 focus-within:ring-indigo-500 dark:ring-slate-600">
       <div class="flex items-center border-b border-slate-200 bg-slate-50 text-sm dark:border-slate-700 dark:bg-slate-800">
-        <button type="button" class="px-3 py-2" :class="preview ? 'text-slate-500' : 'font-semibold text-indigo-600 dark:text-indigo-400'" @click="preview = false">Write</button>
-        <button type="button" class="px-3 py-2" :class="preview ? 'font-semibold text-indigo-600 dark:text-indigo-400' : 'text-slate-500'" @click="preview = true">Preview</button>
-        <a class="ml-auto px-3 py-2 text-xs text-slate-500" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noopener">Markdown help</a>
+        <button type="button" class="px-3 py-2" :class="preview ? 'text-slate-500' : 'font-semibold text-indigo-600 dark:text-indigo-400'" @click="preview = false">{{ t('md.write') }}</button>
+        <button type="button" class="px-3 py-2" :class="preview ? 'font-semibold text-indigo-600 dark:text-indigo-400' : 'text-slate-500'" @click="preview = true">{{ t('md.preview') }}</button>
+        <a class="ml-auto px-3 py-2 text-xs text-slate-500" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noopener">{{ t('md.help') }}</a>
       </div>
       <textarea v-if="!preview" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)"
         :rows="rows" :placeholder="placeholder"
         class="block w-full resize-y border-0 bg-white p-3 text-base focus:outline-none focus:ring-0 dark:bg-slate-900"></textarea>
       <div v-else class="prose prose-sm min-h-[8rem] max-w-none bg-white p-3 dark:prose-invert dark:bg-slate-900">
         <div v-if="modelValue" v-html="markdown(modelValue)"></div>
-        <p v-else class="italic text-slate-400">Nothing to preview.</p>
+        <p v-else class="italic text-slate-400">{{ t('md.empty') }}</p>
       </div>
     </div>`
 };
@@ -111,20 +113,45 @@ const app = createApp({
     // store.state.pictures is replaced when another spreadsheet is opened.
     const pictureCache = computed(() => store.state.pictures);
 
-    // People with how many visits they have and when the latest one was.
+    // Plain-text previews of visit notes, kept until the notes change.
+    const notePreviews = new Map();
+    function notesPreview(visit) {
+      const key = `${visit.id}|${visit.updatedAt}`;
+      if (!notePreviews.has(key)) notePreviews.set(key, markdownToText(visit.notes).replace(/\s+/g, ' ').slice(0, 300));
+      return notePreviews.get(key);
+    }
+
+    // People with how many visits they have, when the latest one was, and its
+    // notes.
     const people = computed(() => {
       const stats = {};
       store.state.visits.forEach(visit => {
-        const stat = stats[visit.personId] || (stats[visit.personId] = { count: 0, last: '' });
+        const stat = stats[visit.personId] || (stats[visit.personId] = { count: 0, last: null });
         stat.count++;
-        if (visit.createdAt > stat.last) stat.last = visit.createdAt;
+        if (!stat.last || visit.createdAt > stat.last.createdAt) stat.last = visit;
       });
-      return store.state.people.map(person => ({
-        ...person,
-        visitCount: stats[person.id] ? stats[person.id].count : 0,
-        lastVisitAt: stats[person.id] ? stats[person.id].last : ''
-      }));
+      return store.state.people.map(person => {
+        const stat = stats[person.id];
+        return {
+          ...person,
+          tags: person.tags || [],
+          visitCount: stat ? stat.count : 0,
+          lastVisitAt: stat ? stat.last.createdAt : '',
+          lastNotes: stat ? notesPreview(stat.last) : ''
+        };
+      });
     });
+
+    /* Language */
+
+    const language = computed(() => i18n.choice);
+    const languages = computed(() => [
+      { code: '', name: t('settings.automatic') },
+      ...Object.entries(LANGUAGE_NAMES).map(([code, name]) => ({ code, name }))
+    ]);
+    function changeLanguage(choice) {
+      setLanguage(choice);
+    }
 
     const current = computed(() => people.value.find(person => person.id === currentId.value) || null);
 
@@ -162,8 +189,8 @@ const app = createApp({
     store.onRejected(rejected => {
       const first = rejected[0];
       showToast(rejected.length === 1
-        ? `The spreadsheet didn’t accept a change: ${first.error}`
-        : `The spreadsheet didn’t accept ${rejected.length} changes. The first problem: ${first.error}`, true);
+        ? t('sync.rejectedOne', { error: first.error })
+        : t('sync.rejectedMany', { count: rejected.length, error: first.error }), true);
     });
 
     /* -- Syncing -------------------------------------------------------- */
@@ -176,7 +203,7 @@ const app = createApp({
       if (store.state.status === 'syncing') return;
       try {
         await store.sync();
-        showToast('Synced.');
+        showToast(t('sync.done'));
       } catch (err) {
         showError(err);
       }
@@ -184,22 +211,21 @@ const app = createApp({
 
     const syncIcon = computed(() => {
       const { status, pending } = store.state;
-      if (status === 'syncing') return { icon: 'bi-arrow-repeat inline-block animate-spin', label: 'Syncing' };
-      if (status === 'auth') return { icon: 'bi-key', color: 'text-red-600 dark:text-red-400', label: 'Can’t sync' };
-      if (status === 'error') return { icon: 'bi-exclamation-triangle', color: 'text-amber-600 dark:text-amber-400', label: 'Sync problem. Try again' };
-      if (status === 'offline') return { icon: 'bi-cloud-slash', label: 'Offline. Try again' };
-      if (pending) return { icon: 'bi-cloud-arrow-up', label: 'Sync now' };
-      return { icon: 'bi-cloud-check', label: 'Sync now' };
+      if (status === 'syncing') return { icon: 'bi-arrow-repeat inline-block animate-spin', label: t('sync.icon.syncing') };
+      if (status === 'auth') return { icon: 'bi-key', color: 'text-red-600 dark:text-red-400', label: t('sync.icon.auth') };
+      if (status === 'error') return { icon: 'bi-exclamation-triangle', color: 'text-amber-600 dark:text-amber-400', label: t('sync.icon.error') };
+      if (status === 'offline') return { icon: 'bi-cloud-slash', label: t('sync.icon.offline') };
+      return { icon: pending ? 'bi-cloud-arrow-up' : 'bi-cloud-check', label: t('sync.icon.now') };
     });
 
     const syncSummary = computed(() => {
       const { status, pending, active } = store.state;
-      if (status === 'syncing') return 'Syncing…';
-      if (status === 'offline') return pending ? `Offline · ${changesWaiting(pending)}` : 'Offline';
-      if (status === 'auth') return 'Can’t sync: the key changed';
-      if (status === 'error') return 'Couldn’t sync. Tap the warning to try again.';
+      if (status === 'syncing') return t('sync.syncing');
+      if (status === 'offline') return pending ? t('sync.offlineWaiting', { waiting: changesWaiting(pending) }) : t('sync.offline');
+      if (status === 'auth') return t('sync.auth');
+      if (status === 'error') return t('sync.error');
       if (pending) return changesWaiting(pending);
-      return active && active.lastSyncAt ? `Synced ${relative(active.lastSyncAt, now.value)}` : '';
+      return active && active.lastSyncAt ? t('sync.synced', { when: relative(active.lastSyncAt, now.value) }) : '';
     });
 
     window.addEventListener('online', autoSync);
@@ -242,7 +268,7 @@ const app = createApp({
     }
 
     function applyUpdate() {
-      if (view.value === 'editPerson' && formState() !== formSnapshot && !confirm('Discard your changes and reload?')) return;
+      if (view.value === 'editPerson' && formState() !== formSnapshot && !confirm(t('notice.discardReload'))) return;
       reloading = true;
       updateReady.value.postMessage('skipWaiting');
     }
@@ -287,9 +313,9 @@ const app = createApp({
     async function saveConnectionForm() {
       const link = connectLink.value;
       if (!link) return;
-      const name = connectForm.name.trim() || link.name || 'My RVs';
+      const name = connectForm.name.trim() || link.name || t('connect.defaultName');
       const existing = connectExisting.value;
-      busy.value = 'Checking the link…';
+      busy.value = t('connect.checking');
       try {
         await callApi(link, 'info');
       } catch (err) {
@@ -298,7 +324,7 @@ const app = createApp({
           showError(err);
           return;
         }
-        if (!confirm(`${err.message}\n\nAdd this spreadsheet anyway? It will sync once it can reach the spreadsheet.`)) return;
+        if (!confirm(t('connect.addAnyway', { error: err.message }))) return;
       }
       busy.value = '';
       if (existing) {
@@ -313,7 +339,7 @@ const app = createApp({
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
       resetView();
       show('list');
-      showToast(existing ? `Reconnected ${name}.` : `Connected ${name}.`);
+      showToast(t(existing ? 'connect.reconnected' : 'connect.connected', { name }));
       autoSync();
     }
 
@@ -325,34 +351,32 @@ const app = createApp({
     }
 
     async function renameConnection(connection) {
-      const name = prompt('Name on this device', connection.name);
+      const name = prompt(t('connect.name'), connection.name);
       if (name && name.trim()) await store.updateConnection(connection.id, { name: name.trim() });
     }
 
     async function removeConnection(connection) {
       const waiting = await store.pendingCount(connection.id);
-      const warning = waiting
-        ? `\n\n${changesWaiting(waiting)} to be sent to the spreadsheet. ${waiting === 1 ? 'It' : 'They'} will be lost.`
-        : '';
-      if (!confirm(`Remove ${connection.name} from this device? The spreadsheet isn’t changed.${warning}`)) return;
+      const warning = waiting ? `\n\n${t('connections.removeWarning', { count: waiting })}` : '';
+      if (!confirm(t('connections.removeConfirm', { name: connection.name }) + warning)) return;
       await store.removeConnection(connection.id);
       delete pendingCounts[connection.id];
       if (!store.state.connections.length) show('welcome');
-      showToast(`Removed ${connection.name}.`);
+      showToast(t('connections.removed', { name: connection.name }));
     }
 
     function redownload() {
-      run('Downloading…', () => store.redownload())
-        .then(() => showToast('Downloaded everything again.'))
+      run(t('connections.downloading'), () => store.redownload())
+        .then(() => showToast(t('connections.redownloaded')))
         .catch(() => {});
     }
 
     async function copyText(text) {
       try {
         await navigator.clipboard.writeText(text);
-        showToast('Copied.');
+        showToast(t('copy.done'));
       } catch (err) {
-        showToast('Couldn’t copy. Select the link and copy it instead.', true);
+        showToast(t('copy.failed'), true);
       }
     }
 
@@ -366,10 +390,10 @@ const app = createApp({
     };
 
     const filters = computed(() => [
-      { key: 'all', label: 'All' },
-      { key: 'due', label: 'Due' },
-      { key: 'upcoming', label: 'Upcoming' },
-      { key: 'study', label: 'Studies' }
+      { key: 'all', label: t('filter.all') },
+      { key: 'due', label: t('filter.due') },
+      { key: 'upcoming', label: t('filter.upcoming') },
+      { key: 'study', label: t('filter.studies') }
     ].map(f => ({ ...f, count: people.value.filter(matchesFilter[f.key]).length })));
 
     // People with a return date come first (soonest first), then everyone
@@ -380,12 +404,25 @@ const app = createApp({
       return (b.lastVisitAt || b.createdAt).localeCompare(a.lastVisitAt || a.createdAt);
     }
 
+    // Every tag in use, alphabetically, for filtering and suggestions.
+    const allTags = computed(() => {
+      const tags = new Map();
+      people.value.forEach(person => person.tags.forEach(tag => {
+        if (!tags.has(tag.toLowerCase())) tags.set(tag.toLowerCase(), tag);
+      }));
+      return [...tags.values()].sort((a, b) => a.localeCompare(b, i18n.locale, { sensitivity: 'base' }));
+    });
+    const tagFilter = ref('');
+
     const filteredPeople = computed(() => {
       const terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+      const tag = tagFilter.value.toLowerCase();
       return people.value
         .filter(matchesFilter[filter.value])
+        .filter(person => !tag || person.tags.some(personTag => personTag.toLowerCase() === tag))
         .filter(person => {
-          const text = [person.name, person.address, person.description, person.availableTimes.join(' ')].join('\n').toLowerCase();
+          const text = [person.name, person.address, person.description, person.availableTimes.join(' '), person.tags.join(' '), person.lastNotes]
+            .join('\n').toLowerCase();
           return terms.every(term => text.includes(term));
         })
         .sort(comparePeople);
@@ -395,6 +432,8 @@ const app = createApp({
 
     function openPerson(person) {
       currentId.value = person.id;
+      calendarOpen.value = false;
+      readyShare.value = null;
       store.loadPictures(person.pictures);
       show('person');
     }
@@ -408,7 +447,9 @@ const app = createApp({
       return days
         .map(day => ({ day, periods: periods.filter(period => times.includes(`${day} ${period}`)) }))
         .filter(entry => entry.periods.length)
-        .map(entry => `${entry.day}: ${entry.periods.length === periods.length ? 'Any time' : entry.periods.join(', ')}`);
+        .map(entry => `${t('day.' + entry.day)}: ${entry.periods.length === periods.length
+          ? t('person.anyTime')
+          : entry.periods.map(period => t('period.' + period)).join(', ')}`);
     }
 
     function openLightbox(ids, index) {
@@ -459,8 +500,10 @@ const app = createApp({
         availableTimes: person ? person.availableTimes.slice() : [],
         pictures: person ? person.pictures.slice() : [],
         newPictures: [],
-        returnAt: person ? toLocalInput(person.returnAt) : ''
+        returnAt: person ? toLocalInput(person.returnAt) : '',
+        tags: person ? person.tags.slice() : []
       });
+      tagInput.value = '';
       formSnapshot = formState();
       closePicker();
     }
@@ -510,14 +553,15 @@ const app = createApp({
 
     async function savePersonForm() {
       if (!form.name.trim()) {
-        showToast('Name is required.', true);
+        showToast(t('form.nameRequired'), true);
         return;
       }
       const coords = parseCoords(form.coordinates);
       if (form.coordinates.trim() && !coords) {
-        showToast('Coordinates must be "latitude, longitude", for example "35.046900, -85.309700".', true);
+        showToast(t('form.badCoordinates'), true);
         return;
       }
+      addTag();
       const isNew = !form.id;
       try {
         const person = await store.savePerson({
@@ -529,30 +573,139 @@ const app = createApp({
           isStudy: form.isStudy,
           availableTimes: form.availableTimes,
           pictures: form.pictures,
-          returnAt: fromLocalInput(form.returnAt)
+          returnAt: fromLocalInput(form.returnAt),
+          tags: form.tags
         }, form.newPictures);
         closePicker();
         currentId.value = person.id;
         store.loadPictures(person.pictures);
         show('person');
-        showToast(isNew ? `Added ${person.name}.` : 'Saved.');
+        showToast(isNew ? t('form.added', { name: person.name }) : t('form.saved'));
       } catch (err) {
         showError(err);
       }
     }
 
     async function removePerson() {
-      if (!confirm(`Delete ${form.name} along with all of their visits and pictures? This can't be undone.`)) return;
+      if (!confirm(t('form.deleteConfirm', { name: form.name }))) return;
       try {
         await store.deletePerson(form.id);
         storage.remove(draftKey(form.id));
         closePicker();
         currentId.value = '';
         show('list');
-        showToast('Deleted.');
+        showToast(t('form.deleted'));
       } catch (err) {
         showError(err);
       }
+    }
+
+    /* Tags */
+
+    const tagInput = ref('');
+    const tagSuggestions = computed(() => {
+      const typed = tagInput.value.toLowerCase();
+      const used = new Set((form.tags || []).map(tag => tag.toLowerCase()));
+      return allTags.value
+        .filter(tag => !used.has(tag.toLowerCase()) && tag.toLowerCase().startsWith(typed))
+        .slice(0, 12);
+    });
+
+    // Spaces become hyphens and other punctuation is dropped as you type. A
+    // comma adds the tag, since tags can't have one.
+    function cleanTagInput(event) {
+      const raw = event.target.value;
+      if (/[,;]/.test(raw)) {
+        addTag(raw.split(/[,;]/)[0]);
+        return;
+      }
+      // A hyphen or space being typed stays until the next letter.
+      const cleaned = cleanTag(raw);
+      tagInput.value = cleaned && /[\s-]$/.test(raw) ? `${cleaned}-` : cleaned;
+      event.target.value = tagInput.value;
+    }
+
+    function addTag(value = tagInput.value) {
+      const tag = cleanTag(value);
+      tagInput.value = '';
+      if (!tag || !form.tags || form.tags.some(existing => existing.toLowerCase() === tag.toLowerCase())) return;
+      form.tags.push(tag);
+    }
+
+    function tagBackspace(event) {
+      if (!tagInput.value && form.tags.length) {
+        event.preventDefault();
+        tagInput.value = form.tags.pop();
+      }
+    }
+
+    /* Sharing and calendar reminders */
+
+    const sharing = ref(false);
+    // When making the PDF takes long enough that the browser won't open the
+    // share sheet anymore, it waits here for another tap.
+    const readyShare = ref(null);
+    const calendarOpen = ref(false);
+
+    async function sharePerson() {
+      const person = current.value;
+      if (!person || sharing.value) return;
+      sharing.value = true;
+      readyShare.value = null;
+      busy.value = t('share.making');
+      let file;
+      try {
+        const blob = await personPdf({
+          person,
+          visits: visits.value,
+          pictures: await store.pictureData(person.pictures),
+          times: timesSummary(person.availableTimes)
+        });
+        file = new File([blob], pdfFileName(person.name), { type: 'application/pdf' });
+        await deliverShare(file, person.name);
+      } catch (err) {
+        if (err.name === 'NotAllowedError' && file) {
+          readyShare.value = { file, title: person.name };
+        } else {
+          showToast(t('share.failed', { error: err.message }), true);
+        }
+      } finally {
+        busy.value = '';
+        sharing.value = false;
+      }
+    }
+
+    async function deliverShare(file, title) {
+      if (await shareOrDownload(file, title) === 'downloaded') showToast(t('share.saved'));
+    }
+
+    async function shareReady() {
+      const ready = readyShare.value;
+      readyShare.value = null;
+      try {
+        await deliverShare(ready.file, ready.title);
+      } catch (err) {
+        showToast(t('share.failed', { error: err.message }), true);
+      }
+    }
+
+    // iPhones offer to add an .ics file to Calendar when it's opened, so it's
+    // opened there and downloaded everywhere else.
+    function downloadCalendarFile(person) {
+      const file = calendarFile(person);
+      const url = URL.createObjectURL(file);
+      if (isIos) {
+        location.href = url;
+      } else {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = file.name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      calendarOpen.value = false;
     }
 
     /* -- Map picker ------------------------------------------------------ */
@@ -622,7 +775,7 @@ const app = createApp({
     async function findPlaces() {
       const query = placeQuery.value.trim();
       if (!query) {
-        showToast('Type an address or paste a Google Maps link.', true);
+        showToast(t('map.typeSomething'), true);
         return;
       }
       // Prefer matches near the area the map is showing.
@@ -637,7 +790,7 @@ const app = createApp({
       } catch (err) {
         clearPlaces();
         if (err.code === 'network') {
-          showToast('Searching needs an internet connection. You can still tap the map or use your location.', true);
+          showToast(t('map.offline'), true);
         } else {
           showError(err);
         }
@@ -680,7 +833,7 @@ const app = createApp({
 
     function useMyLocation() {
       if (!navigator.geolocation) {
-        showToast('Location isn’t available in this browser. Tap the map to drop a pin instead.', true);
+        showToast(t('location.unavailable'), true);
         openPicker();
         return;
       }
@@ -696,7 +849,7 @@ const app = createApp({
         }
       }, err => {
         locating.value = false;
-        showToast(`Couldn’t get your location (${err.message || 'permission denied'}). Tap the map to drop a pin instead.`, true);
+        showToast(t('location.failed', { error: err.message || t('location.denied') }), true);
         openPicker();
       }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
     }
@@ -759,7 +912,7 @@ const app = createApp({
     }, { deep: true });
 
     function discardVisitDraft() {
-      if (!confirm('Discard this draft?')) return;
+      if (!confirm(t('visit.discardConfirm'))) return;
       storage.remove(draftKey(visitForm.personId));
       hasVisitDraft.value = false;
       show('person');
@@ -785,18 +938,18 @@ const app = createApp({
           await addStudyFor(current.value, visitMonth.value);
         }
         show('person');
-        showToast(isNew ? 'Visit saved.' : 'Saved.');
+        showToast(isNew ? t('visit.saved') : t('form.saved'));
       } catch (err) {
         showError(err);
       }
     }
 
     async function removeVisit() {
-      if (!confirm('Delete this visit? This can’t be undone.')) return;
+      if (!confirm(t('visit.deleteConfirm'))) return;
       try {
         await store.deleteVisit(visitForm.id);
         show('person');
-        showToast('Visit deleted.');
+        showToast(t('visit.deleted'));
       } catch (err) {
         showError(err);
       }
@@ -810,9 +963,9 @@ const app = createApp({
     }));
     const summary = computed(() => summarize(reportData.value, reportMonth.value));
     const reportName = computed(() => store.state.active && store.state.active.reportName || '');
-    const currentReportText = computed(() => reportText(summary.value, { name: reportName.value }));
+    const currentReportText = computed(() => reportText(summary.value, { name: reportName.value, t }));
     const changedSinceSent = computed(() => summary.value.sent && summary.value.report.text !== currentReportText.value);
-    const reportHistory = computed(() => reportMonths(reportData.value).map(month => {
+    const reportHistory = computed(() => i18n.locale && reportMonths(reportData.value).map(month => {
       const s = summarize(reportData.value, month);
       return { month, label: monthLabel(month), hours: s.service.liveHours, studies: s.studies.length, sent: s.sent };
     }));
@@ -821,8 +974,10 @@ const app = createApp({
 
     /* Calendar */
 
-    const firstWeekday = weekStart();
-    const weekdays = weekdayLabels(firstWeekday);
+    // The first day of the week follows the device's region; the names follow
+    // the app's language.
+    const firstWeekday = weekStart(navigator.language);
+    const weekdays = computed(() => i18n.locale && weekdayLabels(firstWeekday));
     const today = computed(() => dayKey(now.value));
     const calendar = computed(() => calendarCells(store.state.time, reportMonth.value, firstWeekday));
     // The day whose time is listed under the calendar. It starts on today in
@@ -897,16 +1052,16 @@ const app = createApp({
           return;
         }
         await markSent();
-        showToast(`${monthLabel(reportMonth.value)} report sent.`);
+        showToast(t('report.sentToast', { month: monthLabel(reportMonth.value) }));
         return;
       }
       try {
         await navigator.clipboard.writeText(text);
       } catch (err) {
-        showToast('Couldn’t copy the report. Select the text and copy it instead.', true);
+        showToast(t('report.copyFailed'), true);
         return;
       }
-      if (confirm('The report was copied. Paste it into a message or email.\n\nMark it as sent?')) await markSent();
+      if (confirm(t('report.copiedConfirm'))) await markSent();
     }
 
     /* Bible studies */
@@ -947,7 +1102,7 @@ const app = createApp({
       const name = studyName.value.trim();
       if (!name) return;
       if (summary.value.studies.some(study => studyKey(study) === `name:${name.toLowerCase()}`)) {
-        showToast(`${name} is already counted.`, true);
+        showToast(t('study.alreadyCounted', { name }), true);
         return;
       }
       await store.saveRecord('studies', { id: uuid(), month: reportMonth.value, personId: '', name }).catch(showError);
@@ -1034,11 +1189,11 @@ const app = createApp({
     async function saveTimeForm() {
       const minutes = (Number(timeForm.hours) || 0) * 60 + (Number(timeForm.minutes) || 0);
       if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) {
-        showToast('Enter between 1 minute and 24 hours, in whole minutes.', true);
+        showToast(t('time.invalid'), true);
         return;
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(timeForm.date)) {
-        showToast('Choose a date.', true);
+        showToast(t('time.chooseDate'), true);
         return;
       }
       try {
@@ -1052,17 +1207,17 @@ const app = createApp({
         reportMonth.value = timeForm.date.slice(0, 7);
         selectedDay.value = timeForm.date;
         show('report');
-        showToast(`Saved ${formatMinutes(minutes)}.`);
+        showToast(t('time.saved', { time: formatMinutes(minutes) }));
       } catch (err) {
         showError(err);
       }
     }
 
     async function removeTimeEntry() {
-      if (!confirm('Delete this time entry?')) return;
+      if (!confirm(t('time.deleteConfirm'))) return;
       await store.deleteRecord('time', timeForm.id).catch(showError);
       show('report');
-      showToast('Deleted.');
+      showToast(t('form.deleted'));
     }
 
     /* -- QR code scanner ----------------------------------------------------- */
@@ -1073,13 +1228,13 @@ const app = createApp({
 
     async function openScanner() {
       scanner.open = true;
-      scanner.message = 'Starting the camera…';
+      scanner.message = t('scan.starting');
       await nextTick();
       try {
         const stop = await startScanner(scannerVideo.value, text => {
           const link = parseConnectLink(text);
           if (!link) {
-            scanner.message = 'That isn’t an RV Notes code. In the spreadsheet, choose RV Notes → Connect app.';
+            scanner.message = t('scan.notOurs');
             return false;
           }
           closeScanner();
@@ -1093,7 +1248,7 @@ const app = createApp({
           return;
         }
         stopScanning = stop;
-        scanner.message = 'Point the camera at the QR code from RV Notes → Connect app.';
+        scanner.message = t('scan.point');
       } catch (err) {
         closeScanner();
         showError(err);
@@ -1111,12 +1266,12 @@ const app = createApp({
     const title = computed(() => {
       if (view.value === 'list') return store.state.active ? store.state.active.name : 'RV Notes';
       if (view.value === 'person') return current.value ? current.value.name : '';
-      if (view.value === 'editPerson') return form.id ? `Edit ${current.value ? current.value.name : ''}` : 'New RV';
-      if (view.value === 'visit') return visitForm.id ? 'Edit Visit' : 'New Visit';
-      if (view.value === 'connections') return 'Spreadsheets';
-      if (view.value === 'addConnection') return connectExisting.value ? 'Reconnect a Spreadsheet' : 'Add a Spreadsheet';
-      if (view.value === 'report') return 'Monthly Report';
-      if (view.value === 'timeEntry') return timeForm.id ? 'Edit Time' : 'Add Time';
+      if (view.value === 'editPerson') return form.id ? t('title.editRv', { name: current.value ? current.value.name : '' }) : t('title.newRv');
+      if (view.value === 'visit') return t(visitForm.id ? 'title.editVisit' : 'title.newVisit');
+      if (view.value === 'connections') return t('title.settings');
+      if (view.value === 'addConnection') return t(connectExisting.value ? 'title.reconnect' : 'title.addSpreadsheet');
+      if (view.value === 'report') return t('title.report');
+      if (view.value === 'timeEntry') return t(timeForm.id ? 'title.editTime' : 'title.addTime');
       return 'RV Notes';
     });
 
@@ -1136,7 +1291,7 @@ const app = createApp({
 
     function goBack() {
       if (view.value === 'editPerson') {
-        if (formState() !== formSnapshot && !confirm('Discard your changes?')) return;
+        if (formState() !== formSnapshot && !confirm(t('form.discard'))) return;
         closePicker();
         show(form.id && current.value && current.value.id === form.id ? 'person' : 'list');
       } else if (view.value === 'visit') {
@@ -1145,10 +1300,10 @@ const app = createApp({
         show(store.state.connections.length ? 'connections' : 'welcome');
       } else if (view.value === 'timeEntry') {
         if (timeForm.fromTimer) {
-          if (!confirm('Discard this time? The timer will be cleared.')) return;
+          if (!confirm(t('time.discardTimer'))) return;
           timer.value = null;
           storage.remove(timerKey());
-        } else if (JSON.stringify(timeForm) !== timeSnapshot && !confirm('Discard your changes?')) {
+        } else if (JSON.stringify(timeForm) !== timeSnapshot && !confirm(t('form.discard'))) {
           return;
         }
         show('report');
@@ -1209,7 +1364,10 @@ const app = createApp({
       personStudyMonth, personStudyCounted, togglePersonStudy,
       weekdays, today, calendar, selectedDay, selectedDayEntries, dayLabel, clockMinutes,
       timer, timerElapsed, startTimer, stopTimer, timeForm, newTimeEntry, editTimeEntry, setDuration, saveTimeForm, removeTimeEntry,
-      scanner, scannerVideo, openScanner, closeScanner
+      scanner, scannerVideo, openScanner, closeScanner,
+      t, language, languages, changeLanguage, allTags, tagFilter,
+      tagInput, tagSuggestions, cleanTagInput, addTag, tagBackspace,
+      sharing, readyShare, sharePerson, shareReady, calendarOpen, googleCalendarUrl, downloadCalendarFile
     };
   }
 });

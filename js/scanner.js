@@ -1,6 +1,7 @@
 // Reads QR codes with the camera. Uses the browser's BarcodeDetector where it
 // can read QR codes (Chrome on Android), and otherwise jsQR, which is only
 // loaded the first time it's needed (Safari on iPhone).
+import { t } from './i18n.js';
 
 let jsQRPromise = null;
 
@@ -13,7 +14,7 @@ function loadJsQR() {
       script.onload = () => resolve(window.jsQR);
       script.onerror = () => {
         jsQRPromise = null;
-        reject(new Error('Couldn’t load the QR code reader.'));
+        reject(new Error(t('scan.loadFailed')));
       };
       document.head.appendChild(script);
     });
@@ -33,15 +34,15 @@ async function qrDetector() {
 
 function cameraError(err) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    return new Error('The camera isn’t available in this browser. Paste the link instead.');
+    return new Error(t('scan.noCamera'));
   }
   if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
-    return new Error('RV Notes isn’t allowed to use the camera. Allow camera access in your settings, or paste the link instead.');
+    return new Error(t('scan.notAllowed'));
   }
   if (err && (err.name === 'NotFoundError' || err.name === 'OverconstrainedError')) {
-    return new Error('No camera was found. Paste the link instead.');
+    return new Error(t('scan.notFound'));
   }
-  return new Error('Couldn’t start the camera. Paste the link instead.');
+  return new Error(t('scan.failed'));
 }
 
 /**

@@ -4,8 +4,13 @@ A phone-friendly app for keeping return visit notes. It works offline, and your 
 kept in a Google Sheet you own.
 
 - Add people with a name, address, map location, description, study status, available
-  times, pictures, and when to return.
-- Look someone up and add a visit with notes. Their visits are listed newest first.
+  times, tags, pictures, and when to return.
+- Look someone up and add a visit with notes. Their visits are listed newest first, and
+  the list shows each person's latest notes.
+- Share an RV, with its pictures and every visit, as a PDF through WhatsApp, email, or
+  anything else on your phone's share menu.
+- Add the next return visit to your calendar, so your phone reminds you.
+- In English, Spanish, or Brazilian Portuguese.
 - See who is due. People with a return date are listed first, soonest first, and overdue
   dates are shown in red.
 - Keep track of your time (with a timer) and Bible studies each month, then send your
@@ -107,6 +112,11 @@ about 20 minutes of it being published (the loader and GitHub Pages each keep a 
 site can't be reached, or a download looks wrong or doesn't compile, the last copy that
 worked keeps running.
 
+The spreadsheet's **RV Notes** menu comes from the backend too, so new menu items also
+appear on their own (after reloading the spreadsheet). Loaders pasted before the
+**RV Notes on GitHub** item was added keep their old menu until the new `Loader.gs` is
+pasted once.
+
 **Switching from a pasted `Code.gs` to the loader** (once): replace everything in `Code.gs`
 with `apps-script/Loader.gs`, then **Deploy → Manage deployments → Edit (pencil) →
 Version: New version → Deploy**. Approve the permissions if asked. The URL and key stay the
@@ -157,8 +167,28 @@ soon as it is.
     Messages, WhatsApp, email, and so on. Once it's shared, the month is marked as sent,
     and what was sent is saved. If you change the month later, the app says so and offers
     **Send again**. Minutes carried into the next month come from what was sent.
-- **List.** Search matches names, addresses, descriptions, and available times. Filters:
-  **Due** (return date today or earlier), **Upcoming**, and **Studies**.
+- **List.** Each RV shows the notes from its latest visit. Search matches names,
+  addresses, descriptions, available times, tags, and those notes. Filters: **Due**
+  (return date today or earlier), **Upcoming**, and **Studies**. Below them, tap a tag
+  to show only RVs with it.
+- **Tags.** Type a tag in the RV's **Tags** box and press Enter (or type a comma). Tags can
+  have letters in any language, numbers, and hyphens. A space turns into a hyphen and
+  other punctuation is dropped as you type. Tags you've used before are suggested.
+- **Sharing.** On an RV, tap the share icon. The app makes a PDF with the RV's details,
+  map link, pictures, and every visit's notes, in the app's language, and opens your
+  phone's share menu. Where sharing files isn't supported (most computers), the PDF is
+  downloaded instead. The PDF is made on your phone, so it works offline too. If making it
+  takes too long for the share menu to open, tap **Share** on the card that appears.
+- **Calendar reminders.** When an RV has a return date in the future, **Add to calendar**
+  offers **Google Calendar** (opens it with the visit filled in) or **Other calendar** (a
+  calendar file for Apple Calendar, Outlook, and others, with a reminder an hour before).
+  Web apps can't schedule notifications on their own without a push server, so the
+  calendar does the reminding, even offline.
+- **Language.** The app follows your phone's language (English, Spanish, or Brazilian
+  Portuguese, otherwise English). To choose one, tap the spreadsheet name at the top of the
+  list, then **Language**. The PDF and the monthly report text use the app's language. The
+  spreadsheet's menu and dialogs follow your Google account's language. Messages that come
+  from the spreadsheet itself, like a rejected change, are in English.
 - **Person.** Shows a map, **Open in Maps** and **Directions** links (they use the
   coordinates if there are any, otherwise the address), availability, the description,
   pictures (tap one to view it full screen), and visits, newest first.
@@ -202,6 +232,7 @@ its own columns. If you delete one of the app's headers, it is added back at the
 | Available Times | Comma-separated `Day Period` values, e.g. `Mon Evening, Sat Morning`. Periods are Morning, Afternoon, and Evening. |
 | Pictures | Comma-separated IDs of rows in the **Pictures** sheet, in display order. |
 | Return At | Date and time of the next planned visit (optional). |
+| Tags | Comma-separated, e.g. `follow-up, Spanish`. Letters, numbers, and hyphens only. |
 | Updated At | When the person was last changed, on whichever device changed it. Decides which edit wins. |
 | Synced At | When the spreadsheet received the change. Devices ask for everything synced since their last sync. |
 

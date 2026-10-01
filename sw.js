@@ -4,7 +4,7 @@
 // VERSION and APP_FILES are filled in by `npm run stamp` (scripts/stamp-sw.js).
 // A new VERSION makes browsers download the new files and offer to reload.
 
-const VERSION = '56d5b06509bb';
+const VERSION = 'ffea6acf8b1d';
 const APP_FILES = [
   // FILES-START
   './',
@@ -14,14 +14,19 @@ const APP_FILES = [
   'js/api.js',
   'js/app.js',
   'js/db.js',
+  'js/i18n.js',
+  'js/locale.js',
+  'js/messages.js',
   'js/report.js',
   'js/scanner.js',
+  'js/share.js',
   'js/store.js',
   'js/util.js',
   'vendor/bootstrap-icons/bootstrap-icons.min.css',
   'vendor/bootstrap-icons/fonts/bootstrap-icons.woff',
   'vendor/bootstrap-icons/fonts/bootstrap-icons.woff2',
   'vendor/jsQR.js',
+  'vendor/jspdf.umd.min.js',
   'vendor/leaflet/images/layers-2x.png',
   'vendor/leaflet/images/layers.png',
   'vendor/leaflet/images/marker-icon-2x.png',

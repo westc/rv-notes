@@ -202,6 +202,7 @@ export function createStore() {
       availableTimes: input.availableTimes,
       pictures: [...input.pictures, ...added.map(p => p.id)],
       returnAt: input.returnAt,
+      tags: input.tags || [],
       createdAt: existing ? existing.createdAt : now,
       updatedAt: now
     });
@@ -304,6 +305,13 @@ export function createStore() {
   }
 
   /* -- Pictures ----------------------------------------------------- */
+
+  /** Data URLs of the pictures this device has, in order, skipping the rest. */
+  async function pictureData(ids) {
+    const conn = state.active.id;
+    const pictures = await Promise.all(ids.map(id => db.get('pictures', conn, id)));
+    return pictures.filter(Boolean).map(picture => picture.dataUrl);
+  }
 
   /** Loads pictures from this device into state.pictures. */
   async function loadPictures(ids) {
@@ -517,6 +525,7 @@ export function createStore() {
     saveRecord,
     deleteRecord,
     loadPictures,
+    pictureData,
     sync,
     scheduleSync,
     onRejected: fn => listeners.rejected.push(fn),

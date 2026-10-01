@@ -8,6 +8,8 @@
 //   time, studies, reports  {conn, id, ...}  key [conn, id] (version 2)
 //   outbox       {seq, conn, kind, ...}       changes waiting to be sent
 
+import { t } from './i18n.js';
+
 const DB_NAME = 'rv-notes';
 const DB_VERSION = 2;
 const RECORD_STORES = ['people', 'visits', 'pictures', 'time', 'studies', 'reports'];
@@ -38,7 +40,7 @@ function open() {
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
-      request.onblocked = () => reject(new Error('Close RV Notes in your other tabs, then reload.'));
+      request.onblocked = () => reject(new Error(t('db.blocked')));
     });
   }
   return dbPromise;
@@ -60,7 +62,7 @@ async function transaction(names, mode, fn) {
     });
     tx.oncomplete = () => resolve(result);
     tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error('Saving on this device was cancelled.'));
+    tx.onabort = () => reject(tx.error || new Error(t('db.cancelled')));
   });
 }
 

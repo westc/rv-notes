@@ -42,18 +42,43 @@ function doPost(e) {
 }
 
 /**
- * Simple triggers can't download anything, so the menu is defined here.
+ * Builds the menu from the backend's MENU, so new items show up without
+ * pasting this file again. Simple triggers can't download anything, so this
+ * uses the copy already saved, if there is one.
  */
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('RV Notes')
-    .addItem('Connect app', 'showConnectDialog')
-    .addItem('Reset key', 'resetKey')
-    .addSeparator()
-    .addItem('Set up sheets', 'setUpSheets')
-    .addItem('Update now', 'updateNow')
-    .addToUi();
+  const menu = SpreadsheetApp.getUi().createMenu('RV Notes');
+  let saved = null;
+  try {
+    saved = backend_(true);
+  } catch (err) {
+    // Nothing saved yet, or this copy of the backend has no menu.
+  }
+  if (saved && saved.buildMenu) {
+    saved.buildMenu(menu, (name, index) => `menuItem${index}`);
+  } else {
+    menu.addItem('Connect app', 'showConnectDialog')
+      .addItem('Reset key', 'resetKey')
+      .addSeparator()
+      .addItem('Set up sheets', 'setUpSheets');
+  }
+  menu.addSeparator().addItem(loaderText_('update'), 'updateNow').addToUi();
 }
 
+// Menu items run these, which run the backend's item at the same index. They
+// can't end in an underscore, because menus can't run private functions.
+function menuItem0() { backend_().runMenuItem(0); }
+function menuItem1() { backend_().runMenuItem(1); }
+function menuItem2() { backend_().runMenuItem(2); }
+function menuItem3() { backend_().runMenuItem(3); }
+function menuItem4() { backend_().runMenuItem(4); }
+function menuItem5() { backend_().runMenuItem(5); }
+function menuItem6() { backend_().runMenuItem(6); }
+function menuItem7() { backend_().runMenuItem(7); }
+function menuItem8() { backend_().runMenuItem(8); }
+function menuItem9() { backend_().runMenuItem(9); }
+
+// For menus built before the backend had its own menu.
 function showConnectDialog() {
   return backend_().showConnectDialog();
 }
@@ -74,12 +99,29 @@ function updateNow() {
   try {
     loadCode_(true);
     const props = PropertiesService.getScriptProperties();
-    ui.alert('RV Notes is up to date',
-      `Version ${props.getProperty('loader.hash')}, downloaded ${new Date(props.getProperty('loader.fetchedAt')).toLocaleString()}.`,
+    ui.alert(loaderText_('upToDate'),
+      loaderText_('version').replace('{version}', props.getProperty('loader.hash'))
+        .replace('{date}', new Date(props.getProperty('loader.fetchedAt')).toLocaleString()),
       ui.ButtonSet.OK);
   } catch (err) {
-    ui.alert('Couldn’t update RV Notes', err.message, ui.ButtonSet.OK);
+    ui.alert(loaderText_('failed'), err.message, ui.ButtonSet.OK);
   }
+}
+
+const LOADER_TEXT = {
+  en: { update: 'Update now', upToDate: 'RV Notes is up to date', version: 'Version {version}, downloaded {date}.', failed: 'Couldn’t update RV Notes' },
+  es: { update: 'Actualizar ahora', upToDate: 'RV Notes está actualizado', version: 'Versión {version}, descargada el {date}.', failed: 'No se pudo actualizar RV Notes' },
+  pt: { update: 'Atualizar agora', upToDate: 'O RV Notes está atualizado', version: 'Versão {version}, baixada em {date}.', failed: 'Não foi possível atualizar o RV Notes' }
+};
+
+function loaderText_(key) {
+  let locale = '';
+  try {
+    locale = Session.getActiveUserLocale() || '';
+  } catch (err) {
+    // English it is.
+  }
+  return LOADER_TEXT[/^es/i.test(locale) ? 'es' : /^pt/i.test(locale) ? 'pt' : 'en'][key];
 }
 
 /* ------------------------------------------------------------------------ */
@@ -91,14 +133,29 @@ let backend = null;
 /**
  * Runs the backend code inside a function, so its doPost, doGet, and the rest
  * don't replace this file's, and returns its entry points.
+ *
+ * @param {boolean=} savedOnly Use the cached or saved copy without
+ *     downloading (simple triggers like onOpen can't download).
  */
-function backend_() {
+function backend_(savedOnly) {
   if (!backend) {
-    const code = loadCode_(false);
-    backend = new Function(code +
-      '\n;return { doGet: doGet, doPost: doPost, showConnectDialog: showConnectDialog, resetKey: resetKey, setUpSheets: setUpSheets };')();
+    const code = savedOnly ? savedCode_() : loadCode_(false);
+    if (!code) throw new Error('No saved copy of RV Notes yet.');
+    // Older backends don't have a menu of their own.
+    backend = new Function(code + `
+      ;return {
+        doGet: doGet, doPost: doPost, showConnectDialog: showConnectDialog, resetKey: resetKey, setUpSheets: setUpSheets,
+        buildMenu: typeof buildMenu_ === 'function' ? buildMenu_ : null,
+        runMenuItem: typeof runMenuItem_ === 'function' ? runMenuItem_ : null
+      };`)();
   }
   return backend;
+}
+
+function savedCode_() {
+  const cache = CacheService.getScriptCache();
+  return readPieces_(key => cache.get(key), 'loader.cache') ||
+    readPieces_(key => PropertiesService.getScriptProperties().getProperty(key), 'loader.code');
 }
 
 /**

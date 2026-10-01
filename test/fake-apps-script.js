@@ -111,7 +111,7 @@ class FakeSheet {
  *     as doPost.
  */
 export function loadBackend({
-  codePath = new URL('../apps-script/Code.gs', import.meta.url), apiKey = 'test-key', fetch = null
+  codePath = new URL('../apps-script/Code.gs', import.meta.url), apiKey = 'test-key', fetch = null, locale = 'en'
 } = {}) {
   const sheets = new Map();
   const spreadsheet = {
@@ -127,11 +127,29 @@ export function loadBackend({
   const properties = new Map(apiKey ? [['apiKey', apiKey]] : []);
   const cache = new Map();
   const fetches = [];
+  // What the spreadsheet UI was asked to show: menus and dialogs.
+  const ui = { menus: [], dialogs: [], alerts: [] };
+  const fakeUi = {
+    ButtonSet: { OK: 'OK', OK_CANCEL: 'OK_CANCEL' },
+    Button: { OK: 'OK', CANCEL: 'CANCEL' },
+    createMenu: title => {
+      const menu = { title, items: [] };
+      const builder = {
+        addItem: (label, functionName) => { menu.items.push({ label, functionName }); return builder; },
+        addSeparator: () => { menu.items.push(null); return builder; },
+        addToUi: () => { ui.menus.push(menu); }
+      };
+      return builder;
+    },
+    alert: (title, body) => { ui.alerts.push({ title, body }); return 'OK'; },
+    showModalDialog: (output, title) => { ui.dialogs.push({ title, html: output.html }); }
+  };
 
   const context = {
     console,
     SpreadsheetApp: {
       getActiveSpreadsheet: () => spreadsheet,
+      getUi: () => fakeUi,
       newDataValidation: () => ({ requireCheckbox() { return this; }, build: () => ({}) })
     },
     PropertiesService: {
@@ -164,6 +182,13 @@ export function loadBackend({
       MimeType: { JSON: 'application/json' },
       createTextOutput: text => ({ setMimeType() { return this; }, getContent: () => text })
     },
+    Session: { getActiveUserLocale: () => locale },
+    HtmlService: {
+      createHtmlOutput: html => {
+        const output = { html, setWidth: () => output, setHeight: () => output };
+        return output;
+      }
+    },
     ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/TEST/exec' }) },
     Maps: {
       newGeocoder: () => ({
@@ -186,7 +211,7 @@ export function loadBackend({
   };
   vm.createContext(context);
   vm.runInContext(readFileSync(codePath, 'utf8'), context, { filename: 'Code.gs' });
-  return { context, spreadsheet, properties, cache, fetches };
+  return { context, spreadsheet, properties, cache, fetches, ui };
 }
 
 /**

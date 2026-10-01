@@ -12,6 +12,7 @@
 
 // Where the RV Notes app is hosted. The Connect app link opens it.
 const APP_URL = 'https://westc.github.io/rv-notes/';
+const REPO_URL = 'https://github.com/westc/rv-notes';
 
 // Each table is a sheet whose first row holds these headers. Columns are found
 // by header name, so they can be reordered and extra columns can be added.
@@ -19,7 +20,7 @@ const TABLES = {
   people: {
     name: 'RVs',
     headers: ['ID', 'Name', 'Address', 'Coordinates', 'Description', 'Created At',
-      'Is Study', 'Available Times', 'Pictures', 'Return At', 'Updated At', 'Synced At'],
+      'Is Study', 'Available Times', 'Pictures', 'Return At', 'Tags', 'Updated At', 'Synced At'],
     dates: ['Created At', 'Return At'],
     checkboxes: ['Is Study']
   },
@@ -86,6 +87,11 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const PERIODS = ['Morning', 'Afternoon', 'Evening'];
 
 const DATE_FORMAT = 'yyyy-mm-dd h:mm am/pm';
+// Letters (in any language), numbers, and hyphens. Must match TAG_PATTERN in
+// js/util.js.
+const TAG_PATTERN = /^[\p{L}\p{M}\p{N}]+(?:-[\p{L}\p{M}\p{N}]+)*$/u;
+const MAX_TAG_LENGTH = 40;
+const MAX_TAGS = 30;
 const MONTH_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/;
 const DAY_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 const ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
@@ -175,13 +181,38 @@ function info_() {
 /* Spreadsheet menu                                                         */
 /* ------------------------------------------------------------------------ */
 
+// The menu's items: [text key, function], or null for a separator. Loader.gs
+// builds its menu from this too, so new items reach every spreadsheet.
+const MENU = [
+  ['menu.connect', 'showConnectDialog'],
+  ['menu.resetKey', 'resetKey'],
+  null,
+  ['menu.setUp', 'setUpSheets'],
+  ['menu.github', 'openGitHub']
+];
+
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('RV Notes')
-    .addItem('Connect app', 'showConnectDialog')
-    .addItem('Reset key', 'resetKey')
-    .addSeparator()
-    .addItem('Set up sheets', 'setUpSheets')
-    .addToUi();
+  buildMenu_(SpreadsheetApp.getUi().createMenu('RV Notes'), name => name).addToUi();
+}
+
+/**
+ * Adds MENU's items to menu. handlerName(functionName, index) returns the
+ * name of the global function each item runs.
+ */
+function buildMenu_(menu, handlerName) {
+  MENU.forEach((item, index) => {
+    if (item) {
+      menu.addItem(sheetText_(item[0]), handlerName(item[1], index));
+    } else {
+      menu.addSeparator();
+    }
+  });
+  return menu;
+}
+
+function runMenuItem_(index) {
+  const handlers = { showConnectDialog, resetKey, setUpSheets, openGitHub };
+  return handlers[MENU[index][1]]();
 }
 
 function setUpSheets() {
@@ -201,23 +232,129 @@ function showConnectDialog() {
     appUrl: APP_URL,
     key: props.getProperty('apiKey'),
     name: SpreadsheetApp.getActiveSpreadsheet().getName(),
-    webAppUrl: props.getProperty('webAppUrl') || ScriptApp.getService().getUrl() || ''
+    webAppUrl: props.getProperty('webAppUrl') || ScriptApp.getService().getUrl() || '',
+    text: { needUrl: sheetText_('connect.needUrl'), noQr: sheetText_('connect.noQr'), copied: sheetText_('connect.copied') }
   };
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
-  const html = CONNECT_DIALOG_HTML.replace('{{DATA}}', () => json);
+  const html = fillText_(CONNECT_DIALOG_HTML).replace('{{DATA}}', () => json);
   SpreadsheetApp.getUi().showModalDialog(
-    HtmlService.createHtmlOutput(html).setWidth(420).setHeight(620), 'Connect the RV Notes app');
+    HtmlService.createHtmlOutput(html).setWidth(420).setHeight(620), sheetText_('connect.title'));
 }
 
 function resetKey() {
   const ui = SpreadsheetApp.getUi();
-  const answer = ui.alert('Reset key?',
-    'Every device connected to this spreadsheet will stop syncing until it connects again with the new link. ' +
-    'Changes a device hasn’t synced yet are kept on it until then.',
-    ui.ButtonSet.OK_CANCEL);
+  const answer = ui.alert(sheetText_('reset.title'), sheetText_('reset.body'), ui.ButtonSet.OK_CANCEL);
   if (answer !== ui.Button.OK) return;
   PropertiesService.getScriptProperties().setProperty('apiKey', newKey_());
   showConnectDialog();
+}
+
+function openGitHub() {
+  const html = fillText_(`<!DOCTYPE html>
+<html><head><base target="_blank">
+<style>
+  body { font-family: Arial, sans-serif; font-size: 14px; color: #1e293b; }
+  a.button { display: inline-block; margin-top: 8px; padding: 8px 14px; border-radius: 6px; background: #4f46e5; color: #fff; text-decoration: none; }
+</style></head>
+<body>
+  <p>{{github.body}}</p>
+  <a class="button" href="${REPO_URL}">{{github.open}}</a>
+  <p style="color:#64748b;font-size:12px">${REPO_URL}</p>
+</body></html>`);
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(html).setWidth(380).setHeight(180), sheetText_('github.title'));
+}
+
+/* Spreadsheet text, in the language of the person using the spreadsheet. */
+
+const SHEET_TEXT = {
+  en: {
+    'menu.connect': 'Connect app',
+    'menu.resetKey': 'Reset key',
+    'menu.setUp': 'Set up sheets',
+    'menu.github': 'RV Notes on GitHub',
+    'connect.title': 'Connect the RV Notes app',
+    'connect.name': 'Name in the app',
+    'connect.nameHint': 'For example "Chris’ RVs". It can be changed in the app.',
+    'connect.url': 'Web app URL',
+    'connect.urlHint': 'In Apps Script: Deploy → Manage deployments → copy the Web app URL (it ends in /exec).',
+    'connect.scan': 'In the RV Notes app, tap <b>Scan QR code</b> and point it at this code. (Your phone’s camera app works too.)',
+    'connect.copyLabel': 'Or copy the link',
+    'connect.copy': 'Copy',
+    'connect.copied': 'Copied',
+    'connect.warning': 'Anyone with this link can read and change the RV notes in this spreadsheet, so only share it with people you trust. <b>RV Notes → Reset key</b> disconnects every device.',
+    'connect.needUrl': 'Paste the Web app URL above to get the link.',
+    'connect.noQr': 'The QR code couldn’t load. Copy the link instead.',
+    'reset.title': 'Reset key?',
+    'reset.body': 'Every device connected to this spreadsheet will stop syncing until it connects again with the new link. Changes a device hasn’t synced yet are kept on it until then.',
+    'github.title': 'RV Notes on GitHub',
+    'github.body': 'RV Notes is open source. Its code, setup steps, and instructions are on GitHub.',
+    'github.open': 'Open GitHub'
+  },
+  es: {
+    'menu.connect': 'Conectar la app',
+    'menu.resetKey': 'Restablecer clave',
+    'menu.setUp': 'Preparar hojas',
+    'menu.github': 'RV Notes en GitHub',
+    'connect.title': 'Conectar la app RV Notes',
+    'connect.name': 'Nombre en la app',
+    'connect.nameHint': 'Por ejemplo, "Revisitas de Chris". Se puede cambiar en la app.',
+    'connect.url': 'URL de la aplicación web',
+    'connect.urlHint': 'En Apps Script: Implementar → Gestionar implementaciones → copia la URL de la aplicación web (termina en /exec).',
+    'connect.scan': 'En la app RV Notes, toca <b>Escanear código QR</b> y apunta a este código. (La cámara del teléfono también sirve).',
+    'connect.copyLabel': 'O copia el enlace',
+    'connect.copy': 'Copiar',
+    'connect.copied': 'Copiado',
+    'connect.warning': 'Cualquier persona con este enlace puede ver y cambiar las notas de revisitas de esta hoja de cálculo, así que compártelo solo con personas de confianza. <b>RV Notes → Restablecer clave</b> desconecta todos los dispositivos.',
+    'connect.needUrl': 'Pega arriba la URL de la aplicación web para obtener el enlace.',
+    'connect.noQr': 'No se pudo cargar el código QR. Copia el enlace.',
+    'reset.title': '¿Restablecer clave?',
+    'reset.body': 'Todos los dispositivos conectados a esta hoja de cálculo dejarán de sincronizar hasta que se conecten de nuevo con el enlace nuevo. Los cambios que un dispositivo aún no haya sincronizado se guardan en él hasta entonces.',
+    'github.title': 'RV Notes en GitHub',
+    'github.body': 'RV Notes es de código abierto. Su código, los pasos para prepararlo y las instrucciones están en GitHub.',
+    'github.open': 'Abrir GitHub'
+  },
+  pt: {
+    'menu.connect': 'Conectar o app',
+    'menu.resetKey': 'Redefinir chave',
+    'menu.setUp': 'Preparar páginas',
+    'menu.github': 'RV Notes no GitHub',
+    'connect.title': 'Conectar o app RV Notes',
+    'connect.name': 'Nome no app',
+    'connect.nameHint': 'Por exemplo, "Revisitas do Chris". Dá para mudar no app.',
+    'connect.url': 'URL do app da Web',
+    'connect.urlHint': 'No Apps Script: Implantar → Gerenciar implantações → copie o URL do app da Web (termina em /exec).',
+    'connect.scan': 'No app RV Notes, toque em <b>Ler código QR</b> e aponte para este código. (A câmera do celular também funciona.)',
+    'connect.copyLabel': 'Ou copie o link',
+    'connect.copy': 'Copiar',
+    'connect.copied': 'Copiado',
+    'connect.warning': 'Qualquer pessoa com este link pode ver e alterar as anotações de revisitas desta planilha, então compartilhe só com pessoas de confiança. <b>RV Notes → Redefinir chave</b> desconecta todos os aparelhos.',
+    'connect.needUrl': 'Cole acima o URL do app da Web para obter o link.',
+    'connect.noQr': 'Não foi possível carregar o código QR. Copie o link.',
+    'reset.title': 'Redefinir chave?',
+    'reset.body': 'Todos os aparelhos conectados a esta planilha vão parar de sincronizar até se conectarem de novo com o novo link. As alterações que um aparelho ainda não sincronizou ficam guardadas nele até lá.',
+    'github.title': 'RV Notes no GitHub',
+    'github.body': 'O RV Notes é de código aberto. O código, os passos de configuração e as instruções estão no GitHub.',
+    'github.open': 'Abrir o GitHub'
+  }
+};
+
+function sheetLanguage_() {
+  let locale = '';
+  try {
+    locale = Session.getActiveUserLocale() || '';
+  } catch (err) {
+    // Some contexts can't tell; English it is.
+  }
+  return /^es/i.test(locale) ? 'es' : /^pt/i.test(locale) ? 'pt' : 'en';
+}
+
+function sheetText_(key) {
+  return SHEET_TEXT[sheetLanguage_()][key] || SHEET_TEXT.en[key];
+}
+
+/** Replaces {{key}} in HTML with the text for key. */
+function fillText_(html) {
+  return html.replace(/\{\{([\w.]+)\}\}/g, (match, key) => key === 'DATA' ? match : sheetText_(key));
 }
 
 // About 244 random bits.
@@ -246,28 +383,24 @@ const CONNECT_DIALOG_HTML = `<!DOCTYPE html>
   crossorigin="anonymous"></script>
 </head>
 <body>
-  <label for="name">Name in the app</label>
+  <label for="name">{{connect.name}}</label>
   <input id="name" autocomplete="off">
-  <p class="hint">For example "Chris’ RVs". It can be changed in the app.</p>
+  <p class="hint">{{connect.nameHint}}</p>
 
-  <label for="url">Web app URL</label>
+  <label for="url">{{connect.url}}</label>
   <input id="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
-  <p class="hint">In Apps Script: Deploy → Manage deployments → copy the Web app URL (it ends in /exec).</p>
+  <p class="hint">{{connect.urlHint}}</p>
 
   <div id="qr"></div>
-  <p class="hint" style="text-align:center">In the RV Notes app, tap <b>Scan QR code</b> and point it at this code.
-    (Your phone’s camera app works too.)</p>
+  <p class="hint" style="text-align:center">{{connect.scan}}</p>
 
-  <label for="link">Or copy the link</label>
+  <label for="link">{{connect.copyLabel}}</label>
   <div class="row">
     <input id="link" readonly>
-    <button type="button" id="copy">Copy</button>
+    <button type="button" id="copy">{{connect.copy}}</button>
   </div>
 
-  <div class="warning">
-    Anyone with this link can read and change the RV notes in this spreadsheet, so only share it with
-    people you trust. <b>RV Notes → Reset key</b> disconnects every device.
-  </div>
+  <div class="warning">{{connect.warning}}</div>
 
 <script>
   var data = {{DATA}};
@@ -289,14 +422,16 @@ const CONNECT_DIALOG_HTML = `<!DOCTYPE html>
     var url = urlInput.value.trim();
     if (!/^https:\\/\\/script\\.google\\.com\\/.+\\/exec$/.test(url)) {
       linkInput.value = '';
-      qrBox.innerHTML = '<p class="error">Paste the Web app URL above to get the link.</p>';
+      qrBox.innerHTML = '<p class="error"></p>';
+      qrBox.firstChild.textContent = data.text.needUrl;
       return;
     }
     var payload = JSON.stringify({ u: url, k: data.key, n: nameInput.value.trim() });
     var link = data.appUrl + '#connect=' + base64Url(payload);
     linkInput.value = link;
     if (typeof qrcode !== 'function') {
-      qrBox.innerHTML = '<p class="error">The QR code couldn’t load. Copy the link instead.</p>';
+      qrBox.innerHTML = '<p class="error"></p>';
+      qrBox.firstChild.textContent = data.text.noQr;
       return;
     }
     var qr = qrcode(0, 'M');
@@ -310,7 +445,7 @@ const CONNECT_DIALOG_HTML = `<!DOCTYPE html>
   document.getElementById('copy').addEventListener('click', function () {
     linkInput.select();
     document.execCommand('copy');
-    this.textContent = 'Copied';
+    this.textContent = data.text.copied;
   });
   update();
 </script>
@@ -470,7 +605,8 @@ function personFields_(input, existing) {
     'Is Study': !!input.isStudy,
     'Available Times': normalizeTimes_(input.availableTimes).join(', '),
     'Pictures': (Array.isArray(input.pictures) ? input.pictures : []).filter(isId_).join(','),
-    'Return At': toDate_(input.returnAt)
+    'Return At': toDate_(input.returnAt),
+    'Tags': normalizeTags_(input.tags).join(', ')
   };
 }
 
@@ -779,6 +915,7 @@ function toPerson_(record) {
     availableTimes: normalizeTimes_(splitList_(record['Available Times'])),
     pictures: splitList_(record['Pictures']),
     returnAt: toIso_(record['Return At']),
+    tags: splitList_(record['Tags']).filter(tag => TAG_PATTERN.test(tag)),
     updatedAt: toIso_(record['Updated At'])
   };
 }
@@ -905,6 +1042,26 @@ function normalizeTimes_(times) {
     const time = `${day} ${period}`;
     if (wanted.indexOf(time.toLowerCase()) >= 0) result.push(time);
   }));
+  return result;
+}
+
+/**
+ * Checks tags and drops repeats (ignoring case), keeping the order.
+ */
+function normalizeTags_(tags) {
+  const result = [];
+  const seen = {};
+  (Array.isArray(tags) ? tags : []).forEach(value => {
+    const tag = String(value).trim();
+    if (!tag) return;
+    if (!TAG_PATTERN.test(tag) || tag.length > MAX_TAG_LENGTH) {
+      throw new Error(`"${tag}" isn’t a valid tag. Tags can only have letters, numbers, and hyphens.`);
+    }
+    if (seen[tag.toLowerCase()]) return;
+    seen[tag.toLowerCase()] = true;
+    result.push(tag);
+  });
+  if (result.length > MAX_TAGS) throw new Error(`An RV can have at most ${MAX_TAGS} tags.`);
   return result;
 }
 
