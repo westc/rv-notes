@@ -19,7 +19,7 @@ const REPO_URL = 'https://github.com/westc/rv-notes';
 const TABLES = {
   people: {
     name: 'RVs',
-    headers: ['ID', 'Name', 'Address', 'Coordinates', 'Description', 'Created At',
+    headers: ['ID', 'Name', 'Address', 'Phones', 'Coordinates', 'Description', 'Created At',
       'Is Study', 'Available Times', 'Pictures', 'Return At', 'Tags', 'Updated At', 'Synced At'],
     dates: ['Created At', 'Return At'],
     checkboxes: ['Is Study']
@@ -92,6 +92,13 @@ const DATE_FORMAT = 'yyyy-mm-dd h:mm am/pm';
 const TAG_PATTERN = /^[\p{L}\p{M}\p{N}]+(?:-[\p{L}\p{M}\p{N}]+)*$/u;
 const MAX_TAG_LENGTH = 40;
 const MAX_TAGS = 30;
+// Phone numbers are digits with optional spaces, dots, dashes, slashes, and
+// parentheses, an optional leading +, and an optional extension (x123,
+// ext. 123, or #123). They're stored one per line as "Label: number".
+const PHONE_PATTERN = /^\+?[\d\s().\/-]+(?:\s*(?:x|ext\.?|#)\s*\d+)?$/i;
+const MAX_PHONE_LENGTH = 40;
+const MAX_PHONE_LABEL_LENGTH = 40;
+const MAX_PHONES = 10;
 const MONTH_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/;
 const DAY_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 const ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
@@ -599,6 +606,7 @@ function personFields_(input, existing) {
   return {
     'Name': name,
     'Address': cleanText_(input.address, 'Address', 2000),
+    'Phones': normalizePhones_(input.phones).map(phoneLine_).join('\n'),
     'Coordinates': normalizeCoordinates_(input.coordinates),
     'Description': cleanText_(input.description, 'Description'),
     'Created At': toDate_(input.createdAt) || (existing && toDate_(existing['Created At'])) || new Date(),
@@ -908,6 +916,7 @@ function toPerson_(record) {
     id: String(record['ID']),
     name: String(record['Name']),
     address: String(record['Address']),
+    phones: parsePhones_(record['Phones']),
     coordinates: String(record['Coordinates']),
     description: String(record['Description']),
     createdAt: toIso_(record['Created At']),
@@ -1063,6 +1072,55 @@ function normalizeTags_(tags) {
   });
   if (result.length > MAX_TAGS) throw new Error(`An RV can have at most ${MAX_TAGS} tags.`);
   return result;
+}
+
+/**
+ * Checks phone numbers, tidies their spacing, and drops repeats (the same
+ * digits), keeping the order. Each is {number, label}; the label is optional.
+ */
+function normalizePhones_(phones) {
+  const result = [];
+  const seen = {};
+  (Array.isArray(phones) ? phones : []).forEach(phone => {
+    const number = String((phone && phone.number) || '').replace(/\s+/g, ' ').trim();
+    if (!number) return;
+    const digits = number.replace(/\D/g, '');
+    if (!PHONE_PATTERN.test(number) || digits.length < 3 || number.length > MAX_PHONE_LENGTH) {
+      throw new Error(`"${number}" isn’t a valid phone number.`);
+    }
+    // A colon would split the label from the number in the sheet.
+    const label = String((phone && phone.label) || '').replace(/[:\s]+/g, ' ').trim();
+    if (label.length > MAX_PHONE_LABEL_LENGTH) {
+      throw new Error(`The phone label "${label}" is too long. The limit is ${MAX_PHONE_LABEL_LENGTH} characters.`);
+    }
+    if (seen[digits]) return;
+    seen[digits] = true;
+    result.push({ number, label });
+  });
+  if (result.length > MAX_PHONES) throw new Error(`An RV can have at most ${MAX_PHONES} phone numbers.`);
+  return result;
+}
+
+function phoneLine_(phone) {
+  return phone.label ? `${phone.label}: ${phone.number}` : phone.number;
+}
+
+/**
+ * Reads the Phones cell: one number per line, each optionally starting with
+ * "Label:". Lines that aren't phone numbers (typed in the sheet) are skipped.
+ */
+function parsePhones_(value) {
+  const phones = [];
+  String(value || '').split(/\r?\n/).forEach(line => {
+    const colon = line.indexOf(':');
+    const phone = colon < 0 ? { number: line } : { number: line.slice(colon + 1), label: line.slice(0, colon) };
+    try {
+      phones.push(...normalizePhones_([phone]));
+    } catch (err) {
+      // Not a phone number, so it's left out.
+    }
+  });
+  return normalizePhones_(phones.slice(0, MAX_PHONES));
 }
 
 function splitList_(value) {

@@ -177,6 +177,47 @@ export function directionsUrl(person) {
   return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(mapQuery(person));
 }
 
+// Must match PHONE_PATTERN and the limits in apps-script/Code.gs.
+const PHONE_PATTERN = /^\+?[\d\s().\/-]+(?:\s*(?:x|ext\.?|#)\s*\d+)?$/i;
+export const MAX_PHONES = 10;
+
+/** Whether typed text is a phone number the spreadsheet will accept. */
+export function isPhoneNumber(number) {
+  const text = String(number || '').replace(/\s+/g, ' ').trim();
+  return PHONE_PATTERN.test(text) && text.replace(/\D/g, '').length >= 3 && text.length <= 40;
+}
+
+// "+1 (423) 555-0100 ext. 12" → { dial: "+14235550100", extension: "12" }
+function phoneParts(number) {
+  const match = String(number).match(/^(.*?)(?:\s*(?:x|ext\.?|#)\s*(\d+))?$/i);
+  const main = match[1].trim();
+  return { dial: (main.startsWith('+') ? '+' : '') + main.replace(/\D/g, ''), extension: match[2] || '' };
+}
+
+/** Calls the number. Phones dial the extension after a pause. */
+export function telUrl(number) {
+  const { dial, extension } = phoneParts(number);
+  return `tel:${dial}${extension ? `,${extension}` : ''}`;
+}
+
+export function smsUrl(number) {
+  return `sms:${phoneParts(number).dial}`;
+}
+
+/**
+ * WhatsApp needs the country code, so this is only for numbers that start
+ * with +. Returns '' for others.
+ */
+export function whatsAppUrl(number) {
+  const { dial } = phoneParts(number);
+  return dial.startsWith('+') ? `https://wa.me/${dial.slice(1)}` : '';
+}
+
+/** "Mobile: +1 423 555 0100", as the spreadsheet shows it. */
+export function phoneLine(phone) {
+  return phone.label ? `${phone.label}: ${phone.number}` : phone.number;
+}
+
 export function base64Bytes(dataUrl) {
   const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
   return base64.length / 4 * 3 - (base64.match(/=*$/)[0].length);

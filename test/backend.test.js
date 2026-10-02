@@ -283,6 +283,47 @@ test('tags with punctuation are rejected', () => {
   }
 });
 
+test('phone numbers are stored one per line with their labels and read back', () => {
+  const backend = loadBackend();
+  const result = call(backend, 'sync', { since: '', changes: [
+    putPerson(P1, { phones: [
+      { number: ' +1 (423)  555-0100 ', label: 'Mobile' },
+      { number: '423.555.0101 ext. 12', label: 'Work: front desk' },
+      { number: '+14235550100', label: 'Same digits' },
+      { number: '', label: 'Empty' },
+      { number: '555 0102' }
+    ] })
+  ] });
+  assert.deepEqual(result.rejected, []);
+  assert.deepEqual(result.people[0].phones, [
+    { number: '+1 (423) 555-0100', label: 'Mobile' },
+    { number: '423.555.0101 ext. 12', label: 'Work front desk' },
+    { number: '555 0102', label: '' }
+  ]);
+  const sheet = backend.spreadsheet.getSheetByName('RVs');
+  const column = sheet.rows[0].indexOf('Phones');
+  assert.equal(sheet.rows[1][column], 'Mobile: +1 (423) 555-0100\nWork front desk: 423.555.0101 ext. 12\n555 0102');
+
+  // Typed in the sheet: a plain number, a label, and a line that isn't a number.
+  sheet.rows[1][column] = 'Daughter: 423-555-0103\ncall after 5pm\n4235550104';
+  sheet.rows[1][sheet.rows[0].indexOf('Synced At')] = new Date(Date.now() + 1000);
+  const pulled = call(backend, 'sync', { since: '', changes: [] });
+  assert.deepEqual(pulled.people[0].phones, [
+    { number: '423-555-0103', label: 'Daughter' },
+    { number: '4235550104', label: '' }
+  ]);
+});
+
+test('phone numbers with letters or too few digits are rejected', () => {
+  const backend = loadBackend();
+  for (const number of ['call me', '12', '555-CALL', '+1 423 555 0100 x', 'a'.repeat(41), '5'.repeat(41)]) {
+    const result = call(backend, 'sync', { since: '', changes: [putPerson(P1, { phones: [{ number }] })] });
+    assert.equal(result.rejected.length, 1, number);
+  }
+  const tooMany = Array.from({ length: 11 }, (_, i) => ({ number: `555 01${String(i).padStart(2, '0')}` }));
+  assert.equal(call(backend, 'sync', { since: '', changes: [putPerson(P1, { phones: tooMany })] }).rejected.length, 1);
+});
+
 test('the spreadsheet menu and dialogs follow the user’s language', () => {
   for (const [locale, connect, github] of [['en', 'Connect app', 'RV Notes on GitHub'], ['es_419', 'Conectar la app', 'RV Notes en GitHub'], ['pt_BR', 'Conectar o app', 'RV Notes no GitHub']]) {
     const backend = loadBackend({ locale });

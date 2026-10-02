@@ -203,12 +203,12 @@
         <i class="bi bi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
         <input v-model="search" type="search" class="input pl-9" :placeholder="t('list.search')">
       </div>
-      <div class="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1">
+      <div class="-mx-3 flex gap-2 overflow-x-auto px-3 py-1">
         <button v-for="f in filters" :key="f.key" class="chip" :class="filter === f.key ? 'chip-on' : 'chip-off'" @click="filter = f.key">
           {{ f.label }} <span class="opacity-70">{{ f.count }}</span>
         </button>
       </div>
-      <div v-if="allTags.length" class="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1" :aria-label="t('tags.filter')">
+      <div v-if="allTags.length" class="-mx-3 flex gap-2 overflow-x-auto px-3 py-1" :aria-label="t('tags.filter')">
         <button v-for="tag in allTags" :key="tag" class="chip text-xs" :class="tagFilter === tag ? 'chip-on' : 'chip-off'" @click="tagFilter = tagFilter === tag ? '' : tag">
           <i class="bi bi-tag"></i> {{ tag }}
         </button>
@@ -292,6 +292,18 @@
           <a class="btn flex-1" :href="directionsUrl(current)" target="_blank" rel="noopener"><i class="bi bi-sign-turn-right"></i> {{ t('person.directions') }}</a>
         </div>
 
+        <ul v-if="current.phones.length" class="divide-y divide-slate-100 dark:divide-slate-700">
+          <li v-for="phone in current.phones" :key="phone.number" class="flex items-center gap-1 py-1">
+            <a class="min-w-0 flex-1 py-1" :href="telUrl(phone.number)">
+              <span class="block font-medium">{{ phone.number }}</span>
+              <span v-if="phone.label" class="block text-xs text-slate-500 dark:text-slate-400">{{ phone.label }}</span>
+            </a>
+            <a class="icon-btn text-lg" :href="telUrl(phone.number)" :aria-label="t('phones.call', { number: phone.number })"><i class="bi bi-telephone"></i></a>
+            <a class="icon-btn text-lg" :href="smsUrl(phone.number)" :aria-label="t('phones.text', { number: phone.number })"><i class="bi bi-chat-text"></i></a>
+            <a v-if="whatsAppUrl(phone.number)" class="icon-btn text-lg" :href="whatsAppUrl(phone.number)" target="_blank" rel="noopener" :aria-label="t('phones.whatsApp', { number: phone.number })"><i class="bi bi-whatsapp"></i></a>
+          </li>
+        </ul>
+
         <div v-if="current.availableTimes.length">
           <h3 class="label">{{ t('person.available') }}</h3>
           <ul class="text-sm">
@@ -301,7 +313,7 @@
 
         <div v-if="current.description" class="prose prose-sm max-w-none dark:prose-invert" v-html="markdown(current.description)"></div>
 
-        <p v-if="!current.address && !current.coordinates && !current.description && !current.availableTimes.length" class="text-sm text-slate-500 dark:text-slate-400">
+        <p v-if="!current.address && !current.phones.length && !current.coordinates && !current.description && !current.availableTimes.length" class="text-sm text-slate-500 dark:text-slate-400">
           {{ t('person.noDetails') }}
         </p>
       </section>
@@ -346,6 +358,26 @@
           <div>
             <label class="label" for="address">{{ t('form.address') }}</label>
             <textarea id="address" v-model="form.address" class="input" rows="2" :placeholder="t('form.addressPlaceholder')"></textarea>
+          </div>
+
+          <div>
+            <span class="label">{{ t('phones.label') }}</span>
+            <div v-for="(phone, index) in form.phones" :key="phone.key" class="mb-2 flex gap-2">
+              <input :id="`phone-${phone.key}`" v-model="phone.number" type="tel" inputmode="tel" class="input min-w-0 flex-[3]" autocomplete="off"
+                :placeholder="t('phones.numberPlaceholder')" :aria-label="t('phones.number')">
+              <input v-model="phone.label" class="input min-w-0 flex-[2]" list="phoneLabels" autocomplete="off" maxlength="40"
+                :placeholder="t('phones.labelPlaceholder')" :aria-label="t('phones.labelField')">
+              <button type="button" class="btn" @click="form.phones.splice(index, 1)" :aria-label="t('phones.remove', { number: phone.number })">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <datalist id="phoneLabels">
+              <option :value="t('phones.mobile')"></option>
+              <option :value="t('phones.home')"></option>
+              <option :value="t('phones.work')"></option>
+            </datalist>
+            <button v-if="form.phones.length < maxPhones" type="button" class="btn" @click="addPhone"><i class="bi bi-telephone-plus"></i> {{ t('phones.add') }}</button>
+            <p v-if="form.phones.length" class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ t('phones.hint') }}</p>
           </div>
 
           <div>

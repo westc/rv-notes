@@ -1,6 +1,6 @@
 // Sharing an RV as a PDF, and adding the next return visit to a calendar.
 import { t } from './i18n.js';
-import { formatDateTime, markdownToText, mapsUrl, parseCoords } from './util.js';
+import { formatDateTime, markdownToText, mapsUrl, parseCoords, phoneLine } from './util.js';
 
 let jsPdfPromise = null;
 
@@ -117,6 +117,7 @@ export async function personPdf({ person, visits, pictures, times }) {
   write(t('pdf.subtitle', { date: formatDateTime(new Date().toISOString()) }), { size: 9, color: [100, 116, 139], gap: 10 });
 
   field(t('pdf.address'), person.address);
+  if (person.phones && person.phones.length) field(t('pdf.phones'), person.phones.map(phoneLine).join('\n'));
   const coords = parseCoords(person.coordinates);
   if (coords || person.address) {
     ensure(30);
@@ -234,7 +235,8 @@ function eventDetails(person) {
   const start = new Date(person.returnAt);
   const end = new Date(start.getTime() + VISIT_MINUTES * 60000);
   const location = person.address ? person.address.replace(/\s*\n\s*/g, ', ') : person.coordinates;
-  const description = [person.address || person.coordinates ? mapsUrl(person) : '', markdownToText(person.description)]
+  const phones = (person.phones || []).map(phoneLine).join('\n');
+  const description = [person.address || person.coordinates ? mapsUrl(person) : '', phones, markdownToText(person.description)]
     .filter(Boolean).join('\n\n');
   return { title: t('calendar.eventTitle', { name: person.name }), start, end, location, description };
 }

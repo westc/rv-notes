@@ -3,8 +3,8 @@
 A phone-friendly app for keeping return visit notes. It works offline, and your notes are
 kept in a Google Sheet you own.
 
-- Add people with a name, address, map location, description, study status, available
-  times, tags, pictures, and when to return.
+- Add people with a name, address, phone numbers, map location, description, study
+  status, available times, tags, pictures, and when to return.
 - Look someone up and add a visit with notes. Their visits are listed newest first, and
   the list shows each person's latest notes.
 - Share an RV, with its pictures and every visit, as a PDF through WhatsApp, email, or
@@ -168,9 +168,15 @@ soon as it is.
     and what was sent is saved. If you change the month later, the app says so and offers
     **Send again**. Minutes carried into the next month come from what was sent.
 - **List.** Each RV shows the notes from its latest visit. Search matches names,
-  addresses, descriptions, available times, tags, and those notes. Filters: **Due**
+  addresses, phone numbers (with or without punctuation), descriptions, available times,
+  tags, and those notes. Filters: **Due**
   (return date today or earlier), **Upcoming**, and **Studies**. Below them, tap a tag
   to show only RVs with it.
+- **Phone numbers.** On an RV's edit screen, tap **Add phone number**. Each number can
+  have a label, like Mobile or Daughter. On the RV, tap a number to call it, or use the
+  buttons beside it to call, text, or open WhatsApp. WhatsApp needs the country code, so
+  its button only shows for numbers that start with `+` (for example `+1 423 555 0100`).
+  An extension can go at the end, like `x12` or `ext. 12`.
 - **Tags.** Type a tag in the RV's **Tags** box and press Enter (or type a comma). Tags can
   have letters in any language, numbers, and hyphens. A space turns into a hyphen and
   other punctuation is dropped as you type. Tags you've used before are suggested.
@@ -225,6 +231,7 @@ its own columns. If you delete one of the app's headers, it is added back at the
 | ID | Made by the app (a UUID). |
 | Name | Required. |
 | Address | Free text, can span several lines. |
+| Phones | One number per line, optionally labeled, e.g. `Mobile: +1 423 555 0100`. Lines that aren't phone numbers are ignored. |
 | Coordinates | `latitude, longitude` with 6 decimal places, e.g. `35.046900, -85.309700`. You can paste this into Google Maps, Apple Maps, and most other map apps. |
 | Description | Markdown. |
 | Created At | When the person was first added. |

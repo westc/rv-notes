@@ -196,6 +196,7 @@ export function createStore() {
       id: input.id || uuid(),
       name: input.name.trim(),
       address: input.address.trim(),
+      phones: input.phones || [],
       coordinates: input.coordinates.trim(),
       description: input.description.trim(),
       isStudy: !!input.isStudy,
@@ -496,7 +497,14 @@ export function createStore() {
           const keys = await promisify(s[table].index('conn').getAllKeys(conn));
           keys.filter(([, id]) => !keep.has(id) && !isWaiting(table, id)).forEach(key => s[table].delete(key));
         }
-        result[table].filter(record => !isWaiting(table, record.id)).forEach(record => s[table].put({ conn, ...record }));
+        let records = result[table].filter(record => !isWaiting(table, record.id));
+        if (table === 'people' && records.some(person => !('phones' in person))) {
+          // Scripts from before phone numbers don't send them back, so the
+          // ones on this device are kept until the script is updated.
+          const local = new Map((await promisify(s.people.index('conn').getAll(conn))).map(person => [person.id, person]));
+          records = records.map(person => 'phones' in person ? person : { ...person, phones: (local.get(person.id) || {}).phones || [] });
+        }
+        records.forEach(record => s[table].put({ conn, ...record }));
       }
       result.deleted.forEach(({ table, id }) => {
         if (!TABLES.includes(table)) return;

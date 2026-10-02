@@ -12,7 +12,8 @@ import { startScanner } from './scanner.js';
 import {
   DAYS, PERIODS, MAX_PICTURE_BYTES, markdown, storage, decodeBase64Url, toLocalInput, fromLocalInput,
   formatDateTime, shortDate, relative, endOfToday, returnBadgeClass, firstLine, parseCoords, formatCoords,
-  mapQuery, mapsUrl, directionsUrl, shrinkImage, uuid, nowIso, cleanTag, markdownToText
+  mapQuery, mapsUrl, directionsUrl, shrinkImage, uuid, nowIso, cleanTag, markdownToText,
+  MAX_PHONES, isPhoneNumber, telUrl, smsUrl, whatsAppUrl
 } from './util.js';
 
 const isLocalDev = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -135,6 +136,7 @@ const app = createApp({
         return {
           ...person,
           tags: person.tags || [],
+          phones: person.phones || [],
           visitCount: stat ? stat.count : 0,
           lastVisitAt: stat ? stat.last.createdAt : '',
           lastNotes: stat ? notesPreview(stat.last) : ''
@@ -421,9 +423,12 @@ const app = createApp({
         .filter(matchesFilter[filter.value])
         .filter(person => !tag || person.tags.some(personTag => personTag.toLowerCase() === tag))
         .filter(person => {
-          const text = [person.name, person.address, person.description, person.availableTimes.join(' '), person.tags.join(' '), person.lastNotes]
+          const phones = person.phones.map(phone => `${phone.label} ${phone.number}`);
+          const text = [person.name, person.address, ...phones, person.description, person.availableTimes.join(' '), person.tags.join(' '), person.lastNotes]
             .join('\n').toLowerCase();
-          return terms.every(term => text.includes(term));
+          // "4235550100" finds "(423) 555-0100".
+          const digits = person.phones.map(phone => phone.number.replace(/\D/g, '')).join(' ');
+          return terms.every(term => text.includes(term) || (/^\+?[\d().-]{3,}$/.test(term) && digits.includes(term.replace(/\D/g, ''))));
         })
         .sort(comparePeople);
     });
@@ -494,6 +499,7 @@ const app = createApp({
         id: person ? person.id : '',
         name: person ? person.name : '',
         address: person ? person.address : '',
+        phones: person ? person.phones.map(phone => ({ key: uuid(), ...phone })) : [],
         coordinates: person ? person.coordinates : '',
         description: person ? person.description : '',
         isStudy: person ? person.isStudy : false,
@@ -561,6 +567,14 @@ const app = createApp({
         showToast(t('form.badCoordinates'), true);
         return;
       }
+      const phones = form.phones
+        .map(phone => ({ number: phone.number.replace(/\s+/g, ' ').trim(), label: phone.label.replace(/[:\s]+/g, ' ').trim() }))
+        .filter(phone => phone.number);
+      const badPhone = phones.find(phone => !isPhoneNumber(phone.number));
+      if (badPhone) {
+        showToast(t('phones.invalid', { number: badPhone.number }), true);
+        return;
+      }
       addTag();
       const isNew = !form.id;
       try {
@@ -568,6 +582,7 @@ const app = createApp({
           id: form.id,
           name: form.name,
           address: form.address,
+          phones,
           coordinates: coords ? formatCoords(coords[0], coords[1]) : '',
           description: form.description,
           isStudy: form.isStudy,
@@ -598,6 +613,15 @@ const app = createApp({
       } catch (err) {
         showError(err);
       }
+    }
+
+    /* Phone numbers */
+
+    function addPhone() {
+      if (form.phones.length >= MAX_PHONES) return;
+      const key = uuid();
+      form.phones.push({ key, number: '', label: '' });
+      nextTick(() => document.getElementById(`phone-${key}`).focus());
     }
 
     /* Tags */
@@ -1356,7 +1380,7 @@ const app = createApp({
       placeQuery, findingPlaces, places, placeIndex, findPlaces, previewPlace, confirmPlace, clearPlaces,
       startVisit, editVisit, saveVisitForm, removeVisit, discardVisitDraft, setReturnInWeeks, openLightbox, stepLightbox,
       markdown, formatDateTime, shortDate, relative, returnBadgeClass, firstLine, timesSummary,
-      mapQuery, mapsUrl, directionsUrl,
+      mapQuery, mapsUrl, directionsUrl, telUrl, smsUrl, whatsAppUrl, addPhone, maxPhones: MAX_PHONES,
       visitMonth, visitStudyCounted, monthLabel, formatMinutes, monthKey, addMonths,
       reportMonth, summary, reportName, currentReportText, changedSinceSent, reportHistory, reportComments,
       openReport, stepMonth, setShared, saveComments, saveReportName, sendReport,
