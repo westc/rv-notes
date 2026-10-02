@@ -4,7 +4,7 @@
 // VERSION and APP_FILES are filled in by `npm run stamp` (scripts/stamp-sw.js).
 // A new VERSION makes browsers download the new files and offer to reload.
 
-const VERSION = 'ffea6acf8b1d';
+const VERSION = 'df9724c932ce';
 const APP_FILES = [
   // FILES-START
   './',
