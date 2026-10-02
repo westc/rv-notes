@@ -1,4 +1,5 @@
-// Sharing an RV as a PDF, and adding the next return visit to a calendar.
+// Sharing an RV as a PDF or a text message, and adding the next return visit
+// to a calendar.
 import { t } from './i18n.js';
 import { formatDateTime, markdownToText, mapsUrl, parseCoords, phoneLine } from './util.js';
 
@@ -182,6 +183,85 @@ export async function personPdf({ person, visits, pictures, times }) {
     doc.text(pdfSafe(`${person.name} - ${t('pdf.page', { page, pages })}`), pageWidth / 2, pageHeight - 24, { align: 'center' });
   }
   return doc.output('blob');
+}
+
+/**
+ * The RV as plain text for a message: details first, then every visit.
+ * Takes the same options as personPdf, without pictures.
+ */
+export function personText({ person, visits, times }) {
+  const sections = [];
+  const details = [person.name];
+  if (person.address) details.push(person.address);
+  (person.phones || []).forEach(phone => details.push(`${phone.label || t('text.phone')}: ${phone.number}`));
+  if (person.address || person.coordinates) details.push(mapsUrl(person));
+  sections.push(details.join('\n'));
+
+  const more = [];
+  if (person.isStudy) more.push(`${t('pdf.status')}: ${t('pdf.studying')}`);
+  if (person.returnAt) more.push(`${t('pdf.returnAt')}: ${formatDateTime(person.returnAt)}`);
+  if (times.length) more.push(`${t('pdf.available')}:\n${times.join('\n')}`);
+  if (person.tags && person.tags.length) more.push(`${t('pdf.tags')}: ${person.tags.join(', ')}`);
+  if (more.length) sections.push(more.join('\n'));
+
+  const description = markdownToText(person.description);
+  if (description) sections.push(description);
+
+  if (visits.length) {
+    sections.push(`${t('pdf.visits', { count: visits.length })}`);
+    visits.forEach(visit => sections.push(`${formatDateTime(visit.createdAt)}\n${markdownToText(visit.notes) || t('pdf.noNotes')}`));
+  }
+  return sections.join('\n\n');
+}
+
+/** Whether this browser's share menu can take pictures along with text. */
+export function canSharePictures() {
+  const file = new File([new Uint8Array(1)], 'picture.jpg', { type: 'image/jpeg' });
+  return !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file], text: 'x' }));
+}
+
+/** Pictures (data URLs) as files named after the RV, such as "Ana 1.jpg". */
+export function pictureFiles(dataUrls, name) {
+  const base = String(name).replace(/[\\/:*?"<>|]+/g, '').trim() || 'RV';
+  return dataUrls.map((dataUrl, index) => {
+    const type = dataUrl.slice(5, dataUrl.indexOf(';'));
+    const bytes = Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(',') + 1)), c => c.charCodeAt(0));
+    const extension = { 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[type] || 'jpg';
+    return new File([bytes], `${base} ${index + 1}.${extension}`, { type });
+  });
+}
+
+/**
+ * Opens the share sheet with text (and pictures, if given), or copies the
+ * text where sharing isn't supported. If the pictures are refused, the text
+ * is shared on its own.
+ *
+ * @returns {Promise<'shared'|'textOnly'|'cancelled'|'copied'>}
+ */
+export async function shareText(text, title, files = []) {
+  let refusedPictures = false;
+  if (files.length && navigator.canShare && navigator.canShare({ files, text })) {
+    try {
+      await navigator.share({ title, text, files });
+      return 'shared';
+    } catch (err) {
+      if (err.name === 'AbortError') return 'cancelled';
+      refusedPictures = true;
+    }
+  } else if (files.length) {
+    refusedPictures = true;
+  }
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text });
+      return refusedPictures ? 'textOnly' : 'shared';
+    } catch (err) {
+      if (err.name === 'AbortError') return 'cancelled';
+      if (err.name !== 'NotAllowedError' && err.name !== 'TypeError') throw err;
+    }
+  }
+  await navigator.clipboard.writeText(text);
+  return 'copied';
 }
 
 /** A file name without characters that file systems or apps reject. */

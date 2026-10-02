@@ -7,8 +7,11 @@ kept in a Google Sheet you own.
   status, available times, tags, pictures, and when to return.
 - Look someone up and add a visit with notes. Their visits are listed newest first, and
   the list shows each person's latest notes.
-- Share an RV, with its pictures and every visit, as a PDF through WhatsApp, email, or
-  anything else on your phone's share menu.
+- See every RV on a map, or sort the list by who's nearest to where you are.
+- Share an RV, with every visit, as a text message or a PDF (with pictures) through
+  WhatsApp, email, or anything else on your phone's share menu.
+- Archive RVs you no longer visit. They're hidden but keep their history and can be
+  restored.
 - Add the next return visit to your calendar, so your phone reminds you.
 - In English, Spanish, or Brazilian Portuguese.
 - See who is due. People with a return date are listed first, soonest first, and overdue
@@ -170,8 +173,22 @@ soon as it is.
 - **List.** Each RV shows the notes from its latest visit. Search matches names,
   addresses, phone numbers (with or without punctuation), descriptions, available times,
   tags, and those notes. Filters: **Due**
-  (return date today or earlier), **Upcoming**, and **Studies**. Below them, tap a tag
-  to show only RVs with it.
+  (return date today or earlier), **Upcoming**, **Studies**, and **Archived** (only shown
+  when something is archived). Below them, tap a tag to show only RVs with it.
+- **Nearest first.** The arrow button beside the search box sorts the list by distance
+  from where you are, and shows each RV's straight-line distance (in miles or kilometers,
+  depending on your phone's region). RVs without a map location go last. Tap it again, or
+  **Turn off**, for the usual order.
+- **Map.** The map button beside the search box shows the RVs on a map instead of a list.
+  Pins are colored by return date (red overdue, amber today, blue upcoming), green for
+  studies without a return date, and gray for the rest. Tap a pin, then **Open**. The
+  search, filters, and tags apply to the map too. The crosshair button shows where you
+  are. The app remembers whether you last used the list or the map. Map areas you've
+  viewed are kept for offline use.
+- **Archiving.** On an RV's edit screen, **Archive** hides it from the list, the map, and
+  the counts, but keeps it and all its visits. Find archived RVs with the **Archived**
+  filter and tap **Restore** on one to bring it back. **Delete permanently** removes the
+  RV, its visits, and its pictures from the spreadsheet for good.
 - **Phone numbers.** On an RV's edit screen, tap **Add phone number**. Each number can
   have a label, like Mobile or Daughter. On the RV, tap a number to call it, or use the
   buttons beside it to call, text, or open WhatsApp. WhatsApp needs the country code, so
@@ -180,9 +197,16 @@ soon as it is.
 - **Tags.** Type a tag in the RV's **Tags** box and press Enter (or type a comma). Tags can
   have letters in any language, numbers, and hyphens. A space turns into a hyphen and
   other punctuation is dropped as you type. Tags you've used before are suggested.
-- **Sharing.** On an RV, tap the share icon. The app makes a PDF with the RV's details,
-  map link, pictures, and every visit's notes, in the app's language, and opens your
-  phone's share menu. Where sharing files isn't supported (most computers), the PDF is
+- **Sharing.** On an RV, tap the share icon, then choose:
+  - **Text message**: the RV's details, phone numbers, map link, and every visit's notes
+    as plain text, in the app's language. It reads well in WhatsApp, SMS, or email. Where
+    the share menu isn't available, the text is copied so you can paste it. If the RV has
+    pictures, check **Include the pictures** to send them along. It's off by default
+    because some apps (WhatsApp on some phones) send only the pictures and drop the text.
+    If the app refuses the pictures, the text is shared on its own.
+  - **PDF**: the same, plus pictures, as a document.
+
+  The app makes the PDF and opens your phone's share menu. Where sharing files isn't supported (most computers), the PDF is
   downloaded instead. The PDF is made on your phone, so it works offline too. If making it
   takes too long for the share menu to open, tap **Share** on the card that appears.
 - **Calendar reminders.** When an RV has a return date in the future, **Add to calendar**
@@ -240,6 +264,7 @@ its own columns. If you delete one of the app's headers, it is added back at the
 | Pictures | Comma-separated IDs of rows in the **Pictures** sheet, in display order. |
 | Return At | Date and time of the next planned visit (optional). |
 | Tags | Comma-separated, e.g. `follow-up, Spanish`. Letters, numbers, and hyphens only. |
+| Archived At | When the RV was archived, or empty. Archived RVs are hidden in the app. Clear it to restore one. |
 | Updated At | When the person was last changed, on whichever device changed it. Decides which edit wins. |
 | Synced At | When the spreadsheet received the change. Devices ask for everything synced since their last sync. |
 
@@ -342,6 +367,12 @@ next regular sync.
   Home Screen, which is another reason to install it.
 
 ## Development
+
+[![Tests](https://github.com/westc/rv-notes/actions/workflows/test.yml/badge.svg)](https://github.com/westc/rv-notes/actions/workflows/test.yml)
+
+Every push runs the tests on GitHub (`.github/workflows/test.yml`) and checks that
+`styles.css` and `sw.js` were rebuilt. A failure shows as a red ✗ on the commit and
+GitHub emails you. GitHub Pages still publishes the commit, so fix it soon.
 
 The app has no build step for its JavaScript. `npm run build` only refreshes generated
 files, which are committed so GitHub Pages can serve the repository as is.

@@ -177,6 +177,39 @@ export function directionsUrl(person) {
   return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(mapQuery(person));
 }
 
+/** Straight-line distance in meters between two [lat, lng] points. */
+export function distanceMeters([lat1, lng1], [lat2, lng2]) {
+  const rad = Math.PI / 180;
+  const a = Math.sin((lat2 - lat1) * rad / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin((lng2 - lng1) * rad / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(a));
+}
+
+// Places that measure road distances in miles. The region comes from the
+// device, so someone in the US using the app in Spanish still sees miles.
+const MILE_REGIONS = ['US', 'GB', 'LR', 'MM'];
+
+export function usesMiles(language = typeof navigator === 'undefined' ? 'en-US' : navigator.language) {
+  try {
+    return MILE_REGIONS.includes(new Intl.Locale(language).maximize().region);
+  } catch (err) {
+    return false;
+  }
+}
+
+/** "350 ft", "1.2 mi", "800 m", or "12 km". */
+export function formatDistance(meters, miles = usesMiles()) {
+  const format = (value, unit, digits) =>
+    new Intl.NumberFormat(currentLocale, { style: 'unit', unit, unitDisplay: 'short', maximumFractionDigits: digits }).format(value);
+  if (miles) {
+    const mi = meters / 1609.344;
+    if (mi < 0.1) return format(Math.max(50, Math.round(meters * 3.28084 / 50) * 50), 'foot', 0);
+    return format(mi, 'mile', mi < 10 ? 1 : 0);
+  }
+  if (meters < 1000) return format(Math.max(10, Math.round(meters / 10) * 10), 'meter', 0);
+  return format(meters / 1000, 'kilometer', meters < 10000 ? 1 : 0);
+}
+
 // Must match PHONE_PATTERN and the limits in apps-script/Code.gs.
 const PHONE_PATTERN = /^\+?[\d\s().\/-]+(?:\s*(?:x|ext\.?|#)\s*\d+)?$/i;
 export const MAX_PHONES = 10;

@@ -20,8 +20,8 @@ const TABLES = {
   people: {
     name: 'RVs',
     headers: ['ID', 'Name', 'Address', 'Phones', 'Coordinates', 'Description', 'Created At',
-      'Is Study', 'Available Times', 'Pictures', 'Return At', 'Tags', 'Updated At', 'Synced At'],
-    dates: ['Created At', 'Return At'],
+      'Is Study', 'Available Times', 'Pictures', 'Return At', 'Tags', 'Archived At', 'Updated At', 'Synced At'],
+    dates: ['Created At', 'Return At', 'Archived At'],
     checkboxes: ['Is Study']
   },
   visits: {
@@ -614,7 +614,9 @@ function personFields_(input, existing) {
     'Available Times': normalizeTimes_(input.availableTimes).join(', '),
     'Pictures': (Array.isArray(input.pictures) ? input.pictures : []).filter(isId_).join(','),
     'Return At': toDate_(input.returnAt),
-    'Tags': normalizeTags_(input.tags).join(', ')
+    'Tags': normalizeTags_(input.tags).join(', '),
+    // Archived RVs are hidden in the app but keep their visits.
+    'Archived At': toDate_(input.archivedAt)
   };
 }
 
@@ -925,6 +927,7 @@ function toPerson_(record) {
     pictures: splitList_(record['Pictures']),
     returnAt: toIso_(record['Return At']),
     tags: splitList_(record['Tags']).filter(tag => TAG_PATTERN.test(tag)),
+    archivedAt: toIso_(record['Archived At']),
     updatedAt: toIso_(record['Updated At'])
   };
 }

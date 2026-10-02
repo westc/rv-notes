@@ -16,6 +16,9 @@ const SYNC_DELAY = 1500;
 // first two, so the rest wait in the outbox until the script is updated.
 export const TABLES = ['people', 'visits', 'time', 'studies', 'reports'];
 const OLD_SCRIPT_TABLES = ['people', 'visits'];
+// Person fields that older scripts don't send back. The values on this device
+// are kept until the script is updated.
+const NEWER_PERSON_FIELDS = { phones: [], archivedAt: '' };
 
 // IndexedDB can't store Vue's reactive proxies, so records are copied first.
 function plain(value) {
@@ -204,6 +207,7 @@ export function createStore() {
       pictures: [...input.pictures, ...added.map(p => p.id)],
       returnAt: input.returnAt,
       tags: input.tags || [],
+      archivedAt: input.archivedAt || '',
       createdAt: existing ? existing.createdAt : now,
       updatedAt: now
     });
@@ -498,11 +502,14 @@ export function createStore() {
           keys.filter(([, id]) => !keep.has(id) && !isWaiting(table, id)).forEach(key => s[table].delete(key));
         }
         let records = result[table].filter(record => !isWaiting(table, record.id));
-        if (table === 'people' && records.some(person => !('phones' in person))) {
-          // Scripts from before phone numbers don't send them back, so the
-          // ones on this device are kept until the script is updated.
+        const missing = person => Object.keys(NEWER_PERSON_FIELDS).filter(field => !(field in person));
+        if (table === 'people' && records.some(person => missing(person).length)) {
           const local = new Map((await promisify(s.people.index('conn').getAll(conn))).map(person => [person.id, person]));
-          records = records.map(person => 'phones' in person ? person : { ...person, phones: (local.get(person.id) || {}).phones || [] });
+          records = records.map(person => {
+            const kept = { ...person };
+            missing(person).forEach(field => kept[field] = (local.get(person.id) || NEWER_PERSON_FIELDS)[field] ?? NEWER_PERSON_FIELDS[field]);
+            return kept;
+          });
         }
         records.forEach(record => s[table].put({ conn, ...record }));
       }

@@ -53,7 +53,7 @@
           </button>
         </template>
         <template v-else-if="view === 'person'">
-          <button class="icon-btn" @click="sharePerson" :disabled="!!busy" :aria-label="t('share.button')">
+          <button class="icon-btn" :class="{ 'bg-slate-200 dark:bg-slate-700': shareMenu }" @click="shareMenu = !shareMenu" :disabled="!!busy" :aria-label="t('share.button')" :aria-expanded="shareMenu">
             <i class="bi" :class="sharing ? 'bi-hourglass-split' : 'bi-share'"></i>
           </button>
           <button class="icon-btn" @click="editPerson" :disabled="!!busy" :aria-label="t('common.edit')">
@@ -199,10 +199,25 @@
 
     <!-- List -->
     <main v-else-if="view === 'list'" class="mx-auto max-w-xl space-y-3 p-3">
-      <div class="relative">
-        <i class="bi bi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-        <input v-model="search" type="search" class="input pl-9" :placeholder="t('list.search')">
+      <div class="flex gap-2">
+        <div class="relative min-w-0 flex-1">
+          <i class="bi bi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input v-model="search" type="search" class="input pl-9" :placeholder="t('list.search')">
+        </div>
+        <button class="btn" :class="nearest ? 'bg-indigo-600 text-white ring-indigo-600 active:bg-indigo-700 dark:bg-indigo-600 dark:text-white dark:ring-indigo-600' : ''"
+          @click="toggleNearest" :disabled="findingHere" :aria-pressed="nearest" :aria-label="t('nearby.button')" :title="t('nearby.button')">
+          <i class="bi" :class="findingHere ? 'bi-hourglass-split' : 'bi-cursor'"></i>
+        </button>
+        <button class="btn" @click="listMode = listMode === 'map' ? 'list' : 'map'"
+          :aria-label="t(listMode === 'map' ? 'map.showList' : 'map.showMap')" :title="t(listMode === 'map' ? 'map.showList' : 'map.showMap')">
+          <i class="bi" :class="listMode === 'map' ? 'bi-list-ul' : 'bi-map'"></i>
+        </button>
       </div>
+      <p v-if="nearest" class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+        <i class="bi bi-cursor-fill text-indigo-500"></i>
+        <span class="flex-1">{{ t('nearby.on') }}</span>
+        <button class="font-medium text-indigo-600 dark:text-indigo-400" @click="toggleNearest">{{ t('nearby.off') }}</button>
+      </p>
       <div class="-mx-3 flex gap-2 overflow-x-auto px-3 py-1">
         <button v-for="f in filters" :key="f.key" class="chip" :class="filter === f.key ? 'chip-on' : 'chip-off'" @click="filter = f.key">
           {{ f.label }} <span class="opacity-70">{{ f.count }}</span>
@@ -225,7 +240,23 @@
       </div>
       <p v-else-if="!filteredPeople.length" class="p-6 text-center text-slate-500 dark:text-slate-400">{{ t('list.noMatch') }}</p>
 
-      <ul class="space-y-2">
+      <template v-else-if="listMode === 'map'">
+        <div class="relative">
+          <div ref="allMapEl" class="z-0 h-[calc(100dvh-17rem)] min-h-[18rem] overflow-hidden rounded-xl ring-1 ring-slate-200 dark:ring-slate-700"></div>
+          <button class="absolute right-2 top-2 z-[400] flex h-10 w-10 items-center justify-center rounded-full bg-white text-lg text-slate-700 shadow ring-1 ring-slate-300 active:bg-slate-100"
+            @click="centerOnHere" :disabled="findingHere" :aria-label="t('map.here')" :title="t('map.here')">
+            <i class="bi" :class="findingHere ? 'bi-hourglass-split' : 'bi-crosshair'"></i>
+          </button>
+        </div>
+        <div class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+          <span v-for="item in mapLegend" :key="item.kind" class="inline-flex items-center gap-1">
+            <span class="inline-block h-3 w-3 rounded-full ring-2 ring-white dark:ring-slate-800" :style="{ background: item.color }"></span>{{ item.label }}
+          </span>
+        </div>
+        <p v-if="unmappedCount" class="text-xs text-slate-500 dark:text-slate-400">{{ t('map.unmapped', { count: unmappedCount }) }}</p>
+      </template>
+
+      <ul v-else class="space-y-2">
         <li v-for="person in filteredPeople" :key="person.id">
           <button class="card flex w-full items-start gap-3 p-3 text-left active:bg-slate-50 dark:active:bg-slate-700" @click="openPerson(person)">
             <div class="min-w-0 flex-1">
@@ -245,9 +276,14 @@
                 <span v-for="tag in person.tags" :key="tag" class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-slate-700 dark:text-slate-300">{{ tag }}</span>
               </div>
             </div>
-            <span v-if="person.returnAt" class="badge shrink-0" :class="returnBadgeClass(person.returnAt)">
-              <i class="bi bi-calendar-event"></i> {{ shortDate(person.returnAt) }}
-            </span>
+            <div v-if="person.returnAt || distanceLabel(person)" class="flex shrink-0 flex-col items-end gap-1">
+              <span v-if="person.returnAt" class="badge" :class="returnBadgeClass(person.returnAt)">
+                <i class="bi bi-calendar-event"></i> {{ shortDate(person.returnAt) }}
+              </span>
+              <span v-if="distanceLabel(person)" class="text-xs font-medium text-indigo-700 dark:text-indigo-300">
+                <i class="bi bi-cursor"></i> {{ distanceLabel(person) }}
+              </span>
+            </div>
           </button>
         </li>
       </ul>
@@ -255,6 +291,29 @@
 
     <!-- Person -->
     <main v-else-if="view === 'person' && current" class="mx-auto max-w-xl space-y-3 p-3">
+      <div v-if="current.archivedAt" class="flex items-center gap-3 rounded-xl bg-slate-100 p-3 text-sm text-slate-700 ring-1 ring-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600">
+        <i class="bi bi-archive text-lg"></i>
+        <span class="flex-1">{{ t('archive.banner', { date: shortDate(current.archivedAt) }) }}</span>
+        <button class="btn" @click="restorePerson" :disabled="!!busy"><i class="bi bi-arrow-counterclockwise"></i> {{ t('archive.restore') }}</button>
+      </div>
+      <div v-if="shareMenu" class="card space-y-2 p-3">
+        <p class="text-sm font-medium">{{ t('share.how') }}</p>
+        <button class="btn w-full justify-start text-left" @click="sharePersonText">
+          <i class="bi bi-chat-text text-lg text-emerald-600"></i>
+          <span><span class="block">{{ t('share.text') }}</span><span class="block text-xs font-normal text-slate-500 dark:text-slate-400">{{ t('share.textHint') }}</span></span>
+        </button>
+        <label v-if="sharePicturesSupported && current.pictures.length" class="flex items-start gap-2 px-1 text-sm">
+          <input type="checkbox" v-model="shareWithPictures" class="mt-0.5 h-5 w-5 shrink-0 rounded accent-indigo-600">
+          <span>
+            <span class="block">{{ t('share.withPictures', { count: current.pictures.length }) }}</span>
+            <span class="block text-xs text-slate-500 dark:text-slate-400">{{ t('share.withPicturesHint') }}</span>
+          </span>
+        </label>
+        <button class="btn w-full justify-start text-left" @click="sharePerson" :disabled="sharing">
+          <i class="bi bi-file-earmark-pdf text-lg text-red-600"></i>
+          <span><span class="block">{{ t('share.pdf') }}</span><span class="block text-xs font-normal text-slate-500 dark:text-slate-400">{{ t('share.pdfHint') }}</span></span>
+        </button>
+      </div>
       <div v-if="readyShare" class="card flex items-center gap-3 p-3 text-sm">
         <i class="bi bi-file-earmark-pdf text-lg text-red-600"></i>
         <span class="flex-1">{{ t('share.ready') }}</span>
@@ -269,7 +328,7 @@
           <span v-for="tag in current.tags" :key="tag" class="badge bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200"><i class="bi bi-tag"></i> {{ tag }}</span>
         </div>
 
-        <div v-if="current.returnAt && new Date(current.returnAt) > now">
+        <div v-if="current.returnAt && !current.archivedAt && new Date(current.returnAt) > now">
           <button v-if="!calendarOpen" class="btn w-full" @click="calendarOpen = true"><i class="bi bi-calendar-plus"></i> {{ t('calendar.add') }}</button>
           <div v-else class="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
             <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('calendar.hint') }}</p>
@@ -521,9 +580,17 @@
         <button v-if="!form.id" type="submit" class="btn-primary w-full" :disabled="!!busy || processingPictures">
           <i class="bi bi-person-fill-add"></i> {{ t('form.addRv') }}
         </button>
-        <button v-if="form.id" type="button" class="btn-danger w-full" @click="removePerson" :disabled="!!busy">
-          <i class="bi bi-trash"></i> {{ t('form.delete', { name: form.name || t('form.thisPerson') }) }}
-        </button>
+        <div v-if="form.id" class="card space-y-3 p-4">
+          <template v-if="!form.archivedAt">
+            <button type="button" class="btn w-full" @click="archivePerson" :disabled="!!busy">
+              <i class="bi bi-archive"></i> {{ t('archive.button', { name: form.name || t('form.thisPerson') }) }}
+            </button>
+            <p class="-mt-1 text-xs text-slate-500 dark:text-slate-400">{{ t('archive.hint') }}</p>
+          </template>
+          <button type="button" class="btn-danger w-full" @click="removePerson" :disabled="!!busy">
+            <i class="bi bi-trash"></i> {{ t('form.delete', { name: form.name || t('form.thisPerson') }) }}
+          </button>
+        </div>
       </form>
     </main>
 

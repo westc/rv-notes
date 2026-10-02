@@ -2,7 +2,9 @@ import { createApp, ref, reactive, computed, watch, nextTick } from '../vendor/v
 import * as L from '../vendor/leaflet/leaflet-src.esm.js';
 import { callApi } from './api.js';
 import { i18n, LANGUAGE_NAMES, setLanguage, t } from './i18n.js';
-import { calendarFile, googleCalendarUrl, pdfFileName, personPdf, shareOrDownload } from './share.js';
+import {
+  calendarFile, canSharePictures, googleCalendarUrl, pdfFileName, personPdf, personText, pictureFiles, shareOrDownload, shareText
+} from './share.js';
 import { createStore } from './store.js';
 import {
   addMonths, calendarCells, clockMinutes, dayKey, formatMinutes, monthKey, monthLabel, reportId, reportMonths,
@@ -13,7 +15,7 @@ import {
   DAYS, PERIODS, MAX_PICTURE_BYTES, markdown, storage, decodeBase64Url, toLocalInput, fromLocalInput,
   formatDateTime, shortDate, relative, endOfToday, returnBadgeClass, firstLine, parseCoords, formatCoords,
   mapQuery, mapsUrl, directionsUrl, shrinkImage, uuid, nowIso, cleanTag, markdownToText,
-  MAX_PHONES, isPhoneNumber, telUrl, smsUrl, whatsAppUrl
+  MAX_PHONES, isPhoneNumber, telUrl, smsUrl, whatsAppUrl, distanceMeters, formatDistance
 } from './util.js';
 
 const isLocalDev = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -137,6 +139,7 @@ const app = createApp({
           ...person,
           tags: person.tags || [],
           phones: person.phones || [],
+          archivedAt: person.archivedAt || '',
           visitCount: stat ? stat.count : 0,
           lastVisitAt: stat ? stat.last.createdAt : '',
           lastNotes: stat ? notesPreview(stat.last) : ''
@@ -384,19 +387,78 @@ const app = createApp({
 
     /* -- List ------------------------------------------------------------ */
 
+    // Archived RVs only show with the Archived filter.
     const matchesFilter = {
-      all: () => true,
-      due: person => person.returnAt && new Date(person.returnAt) < endOfToday(),
-      upcoming: person => person.returnAt && new Date(person.returnAt) >= endOfToday(),
-      study: person => person.isStudy
+      all: person => !person.archivedAt,
+      due: person => !person.archivedAt && person.returnAt && new Date(person.returnAt) < endOfToday(),
+      upcoming: person => !person.archivedAt && person.returnAt && new Date(person.returnAt) >= endOfToday(),
+      study: person => !person.archivedAt && person.isStudy,
+      archived: person => !!person.archivedAt
     };
 
     const filters = computed(() => [
       { key: 'all', label: t('filter.all') },
       { key: 'due', label: t('filter.due') },
       { key: 'upcoming', label: t('filter.upcoming') },
-      { key: 'study', label: t('filter.studies') }
-    ].map(f => ({ ...f, count: people.value.filter(matchesFilter[f.key]).length })));
+      { key: 'study', label: t('filter.studies') },
+      { key: 'archived', label: t('filter.archived') }
+    ].map(f => ({ ...f, count: people.value.filter(matchesFilter[f.key]).length }))
+      .filter(f => f.key !== 'archived' || f.count || filter.value === 'archived'));
+
+    /* Nearest first */
+
+    // Where the device was when Nearest was turned on: {coords, at}.
+    const here = ref(null);
+    const nearest = ref(false);
+    const findingHere = ref(false);
+
+    function locateHere() {
+      if (!navigator.geolocation) return Promise.reject(new Error(t('nearby.unavailable')));
+      findingHere.value = true;
+      return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(position => {
+          findingHere.value = false;
+          here.value = { coords: [position.coords.latitude, position.coords.longitude], at: Date.now() };
+          resolve(here.value);
+        }, err => {
+          findingHere.value = false;
+          reject(new Error(t('nearby.failed', { error: err.message || t('location.denied') })));
+        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+      });
+    }
+
+    async function toggleNearest() {
+      if (nearest.value) {
+        nearest.value = false;
+        return;
+      }
+      try {
+        await locateHere();
+        nearest.value = true;
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    // Coming back to the list after moving on updates the distances.
+    watch(view, name => {
+      if (name === 'list' && nearest.value && here.value && Date.now() - here.value.at > 60000) locateHere().catch(() => {});
+    });
+
+    const distances = computed(() => {
+      const result = {};
+      if (!nearest.value || !here.value) return result;
+      people.value.forEach(person => {
+        const coords = parseCoords(person.coordinates);
+        if (coords) result[person.id] = distanceMeters(here.value.coords, coords);
+      });
+      return result;
+    });
+
+    function distanceLabel(person) {
+      const meters = distances.value[person.id];
+      return meters === undefined ? '' : formatDistance(meters);
+    }
 
     // People with a return date come first (soonest first), then everyone
     // else by most recent activity.
@@ -430,14 +492,149 @@ const app = createApp({
           const digits = person.phones.map(phone => phone.number.replace(/\D/g, '')).join(' ');
           return terms.every(term => text.includes(term) || (/^\+?[\d().-]{3,}$/.test(term) && digits.includes(term.replace(/\D/g, ''))));
         })
-        .sort(comparePeople);
+        .sort((a, b) => {
+          if (nearest.value && here.value) {
+            const da = distances.value[a.id], db = distances.value[b.id];
+            // RVs without a location go last.
+            if (da !== undefined || db !== undefined) {
+              if (da === undefined || db === undefined) return da === undefined ? 1 : -1;
+              return da - db;
+            }
+          }
+          return comparePeople(a, b);
+        });
     });
+
+    // The Archived filter goes away once nothing is archived.
+    watch(() => filters.value.find(f => f.key === filter.value), found => {
+      if (filter.value === 'archived' && found && !found.count && view.value === 'list') filter.value = 'all';
+    });
+
+    /* Map of every RV */
+
+    const listMode = ref(storage.get('rv-notes/listMode') === 'map' ? 'map' : 'list');
+    watch(listMode, mode => storage.set('rv-notes/listMode', mode));
+    const allMapEl = ref(null);
+    let allMap = null;
+    let allMapPins = null;
+    let hereMarker = null;
+    let drawnPins = '';
+    // The map's position is kept while the same RVs are on it, so coming back
+    // from an RV doesn't move it.
+    let savedMapView = null;
+
+    const PIN_COLORS = { overdue: '#dc2626', today: '#d97706', later: '#0284c7', study: '#059669', other: '#64748b' };
+    function pinKind(person) {
+      if (person.returnAt) {
+        const date = new Date(person.returnAt);
+        return date < new Date() ? 'overdue' : date < endOfToday() ? 'today' : 'later';
+      }
+      return person.isStudy ? 'study' : 'other';
+    }
+    const mapLegend = computed(() => Object.entries(PIN_COLORS).map(([kind, color]) => ({ kind, color, label: t('map.legend.' + kind) })));
+
+    const mappedPeople = computed(() => filteredPeople.value
+      .map(person => ({ person, coords: parseCoords(person.coordinates) }))
+      .filter(entry => entry.coords));
+    const unmappedCount = computed(() => filteredPeople.value.length - mappedPeople.value.length);
+
+    // Names are typed by users, so the popup is built from elements, never
+    // HTML.
+    function pinPopup(person) {
+      const box = document.createElement('div');
+      box.className = 'space-y-1';
+      const name = document.createElement('p');
+      name.className = 'font-semibold text-sm !m-0';
+      name.textContent = person.name;
+      box.appendChild(name);
+      const details = [person.address && firstLine(person.address), person.returnAt && t('map.returnOn', { date: shortDate(person.returnAt) }), distanceLabel(person)]
+        .filter(Boolean);
+      details.forEach(text => {
+        const line = document.createElement('p');
+        line.className = 'text-xs text-slate-600 !m-0';
+        line.textContent = text;
+        box.appendChild(line);
+      });
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'mt-1 w-full rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white';
+      open.textContent = t('map.open');
+      open.addEventListener('click', () => openPerson(person));
+      box.appendChild(open);
+      return box;
+    }
+
+    function syncAllMap() {
+      const el = view.value === 'list' && listMode.value === 'map' ? allMapEl.value : null;
+      if (allMap && (!el || allMap.getContainer() !== el)) {
+        savedMapView = { ...savedMapView, center: allMap.getCenter(), zoom: allMap.getZoom() };
+        allMap.remove();
+        allMap = null;
+      }
+      if (!el) return;
+      const created = !allMap;
+      if (created) {
+        drawnPins = '';
+        allMap = L.map(el, { zoomControl: false });
+        L.control.zoom({ position: 'bottomright' }).addTo(allMap);
+        addTiles(allMap);
+        allMapPins = L.layerGroup().addTo(allMap);
+        allMap.on('moveend', () => {
+          if (savedMapView) Object.assign(savedMapView, { center: allMap.getCenter(), zoom: allMap.getZoom() });
+        });
+      }
+      // Leaflet needs a position before anything is drawn. A new map goes
+      // back to where it was; a different set of RVs is fitted on screen.
+      const key = mappedPeople.value.map(entry => entry.person.id).sort().join(',');
+      if (created && savedMapView && savedMapView.key === key && savedMapView.center) {
+        allMap.setView(savedMapView.center, savedMapView.zoom, { animate: false });
+      } else if (!savedMapView || savedMapView.key !== key) {
+        const points = mappedPeople.value.map(entry => entry.coords);
+        if (points.length) {
+          allMap.fitBounds(points, { padding: [32, 32], maxZoom: 16, animate: false });
+        } else if (here.value) {
+          allMap.setView(here.value.coords, 14, { animate: false });
+        } else {
+          allMap.setView([20, 0], 2, { animate: false });
+        }
+        savedMapView = { key, center: allMap.getCenter(), zoom: allMap.getZoom() };
+      }
+
+      // Syncing replaces every record, so pins are only redrawn when they
+      // change. Redrawing would close an open popup.
+      const pins = JSON.stringify([mappedPeople.value.map(({ person, coords }) => [person.id, person.name, person.address, person.returnAt, pinKind(person), coords]),
+        here.value && here.value.coords, i18n.locale]);
+      if (pins === drawnPins) return;
+      drawnPins = pins;
+      allMapPins.clearLayers();
+      mappedPeople.value.forEach(({ person, coords }) => {
+        L.circleMarker(coords, {
+          radius: 9, weight: 2, color: '#fff', fillColor: PIN_COLORS[pinKind(person)], fillOpacity: 1
+        }).bindPopup(() => pinPopup(person), { minWidth: 180 }).addTo(allMapPins);
+      });
+      if (hereMarker) hereMarker.remove();
+      hereMarker = here.value
+        ? L.circleMarker(here.value.coords, { radius: 7, weight: 3, color: '#fff', fillColor: '#2563eb', fillOpacity: 1, interactive: false }).addTo(allMap)
+        : null;
+    }
+    watch(() => [view.value, listMode.value, mappedPeople.value, here.value, i18n.locale], () => nextTick(syncAllMap));
+
+    async function centerOnHere() {
+      try {
+        const position = await locateHere();
+        if (allMap) allMap.setView(position.coords, Math.max(allMap.getZoom(), 15));
+      } catch (err) {
+        showError(err);
+      }
+    }
 
     /* -- Person ---------------------------------------------------------- */
 
     function openPerson(person) {
       currentId.value = person.id;
       calendarOpen.value = false;
+      shareMenu.value = false;
+      shareWithPictures.value = false;
       readyShare.value = null;
       store.loadPictures(person.pictures);
       show('person');
@@ -507,7 +704,8 @@ const app = createApp({
         pictures: person ? person.pictures.slice() : [],
         newPictures: [],
         returnAt: person ? toLocalInput(person.returnAt) : '',
-        tags: person ? person.tags.slice() : []
+        tags: person ? person.tags.slice() : [],
+        archivedAt: person ? person.archivedAt : ''
       });
       tagInput.value = '';
       formSnapshot = formState();
@@ -558,14 +756,46 @@ const app = createApp({
     }
 
     async function savePersonForm() {
+      const isNew = !form.id;
+      const person = await persistForm(form.archivedAt);
+      if (!person) return;
+      show('person');
+      showToast(isNew ? t('form.added', { name: person.name }) : t('form.saved'));
+    }
+
+    // Saves the form, so edits made before archiving aren't lost.
+    async function archivePerson() {
+      const person = await persistForm(nowIso());
+      if (!person) return;
+      currentId.value = '';
+      show('list');
+      showToast(t('archive.done', { name: person.name }));
+    }
+
+    async function restorePerson() {
+      const person = current.value;
+      try {
+        await store.savePerson({ ...person, archivedAt: '' });
+        showToast(t('archive.restored', { name: person.name }));
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    /**
+     * Checks and saves the form.
+     *
+     * @returns {Promise<?Object>} The saved person, or null if it wasn't saved.
+     */
+    async function persistForm(archivedAt) {
       if (!form.name.trim()) {
         showToast(t('form.nameRequired'), true);
-        return;
+        return null;
       }
       const coords = parseCoords(form.coordinates);
       if (form.coordinates.trim() && !coords) {
         showToast(t('form.badCoordinates'), true);
-        return;
+        return null;
       }
       const phones = form.phones
         .map(phone => ({ number: phone.number.replace(/\s+/g, ' ').trim(), label: phone.label.replace(/[:\s]+/g, ' ').trim() }))
@@ -573,10 +803,9 @@ const app = createApp({
       const badPhone = phones.find(phone => !isPhoneNumber(phone.number));
       if (badPhone) {
         showToast(t('phones.invalid', { number: badPhone.number }), true);
-        return;
+        return null;
       }
       addTag();
-      const isNew = !form.id;
       try {
         const person = await store.savePerson({
           id: form.id,
@@ -589,15 +818,16 @@ const app = createApp({
           availableTimes: form.availableTimes,
           pictures: form.pictures,
           returnAt: fromLocalInput(form.returnAt),
-          tags: form.tags
+          tags: form.tags,
+          archivedAt
         }, form.newPictures);
         closePicker();
         currentId.value = person.id;
         store.loadPictures(person.pictures);
-        show('person');
-        showToast(isNew ? t('form.added', { name: person.name }) : t('form.saved'));
+        return person;
       } catch (err) {
         showError(err);
+        return null;
       }
     }
 
@@ -670,8 +900,31 @@ const app = createApp({
     // share sheet anymore, it waits here for another tap.
     const readyShare = ref(null);
     const calendarOpen = ref(false);
+    // Share opens a choice between a text message and a PDF.
+    const shareMenu = ref(false);
+    const sharePicturesSupported = canSharePictures();
+    // Off by default: some apps (like WhatsApp on some phones) drop the text
+    // when pictures come with it.
+    const shareWithPictures = ref(false);
+
+    async function sharePersonText() {
+      const person = current.value;
+      shareMenu.value = false;
+      const text = personText({ person, visits: visits.value, times: timesSummary(person.availableTimes) });
+      // The pictures shown on the RV are already loaded. Waiting for anything
+      // else could take long enough that the share menu won't open.
+      const dataUrls = shareWithPictures.value ? person.pictures.map(id => pictureCache.value[id]).filter(Boolean) : [];
+      try {
+        const result = await shareText(text, person.name, pictureFiles(dataUrls, person.name));
+        if (result === 'copied') showToast(t('share.copied'));
+        if (result === 'textOnly') showToast(t('share.picturesDropped'));
+      } catch (err) {
+        showToast(t('share.textFailed', { error: err.message }), true);
+      }
+    }
 
     async function sharePerson() {
+      shareMenu.value = false;
       const person = current.value;
       if (!person || sharing.value) return;
       sharing.value = true;
@@ -1108,7 +1361,7 @@ const app = createApp({
     // first as one-tap suggestions.
     const studyCandidates = computed(() => {
       const counted = new Set(summary.value.studies.map(study => study.personId).filter(Boolean));
-      return people.value.filter(person => !counted.has(person.id)).sort((a, b) => a.name.localeCompare(b.name));
+      return people.value.filter(person => !counted.has(person.id) && !person.archivedAt).sort((a, b) => a.name.localeCompare(b.name));
     });
     const studySuggestions = computed(() => studyCandidates.value.filter(person => person.isStudy));
 
@@ -1376,7 +1629,8 @@ const app = createApp({
       saveConnectionForm, switchConnection, renameConnection, removeConnection, redownload, copyText, changesWaiting,
       form, processingPictures, pickerOpen, pickerEl, miniMapEl, locating, visitForm, hasVisitDraft,
       openPerson, newPerson, editPerson, goBack, toggleTimes, toggleRow, toggleColumn, addPictureFiles,
-      savePersonForm, removePerson, togglePicker, useMyLocation,
+      savePersonForm, removePerson, archivePerson, restorePerson, togglePicker, useMyLocation,
+      nearest, findingHere, toggleNearest, distanceLabel, listMode, allMapEl, mapLegend, unmappedCount, centerOnHere,
       placeQuery, findingPlaces, places, placeIndex, findPlaces, previewPlace, confirmPlace, clearPlaces,
       startVisit, editVisit, saveVisitForm, removeVisit, discardVisitDraft, setReturnInWeeks, openLightbox, stepLightbox,
       markdown, formatDateTime, shortDate, relative, returnBadgeClass, firstLine, timesSummary,
@@ -1391,7 +1645,7 @@ const app = createApp({
       scanner, scannerVideo, openScanner, closeScanner,
       t, language, languages, changeLanguage, allTags, tagFilter,
       tagInput, tagSuggestions, cleanTagInput, addTag, tagBackspace,
-      sharing, readyShare, sharePerson, shareReady, calendarOpen, googleCalendarUrl, downloadCalendarFile
+      sharing, readyShare, sharePerson, shareReady, shareMenu, sharePersonText, sharePicturesSupported, shareWithPictures, calendarOpen, googleCalendarUrl, downloadCalendarFile
     };
   }
 });

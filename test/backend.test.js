@@ -283,6 +283,17 @@ test('tags with punctuation are rejected', () => {
   }
 });
 
+test('archiving keeps the RV and its visits, and restoring clears the date', () => {
+  const backend = loadBackend();
+  const archivedAt = '2026-10-02T15:00:00.000Z';
+  const first = call(backend, 'sync', { since: '', changes: [putPerson(P1, { archivedAt })] });
+  assert.equal(first.people[0].archivedAt, archivedAt);
+  const sheet = backend.spreadsheet.getSheetByName('RVs');
+  assert.equal(Object.prototype.toString.call(sheet.rows[1][sheet.rows[0].indexOf('Archived At')]), '[object Date]');
+  const restored = call(backend, 'sync', { since: first.cursor, changes: [putPerson(P1, { archivedAt: '' }, new Date(Date.now() + 1000).toISOString())] });
+  assert.equal(restored.people[0].archivedAt, '');
+});
+
 test('phone numbers are stored one per line with their labels and read back', () => {
   const backend = loadBackend();
   const result = call(backend, 'sync', { since: '', changes: [
