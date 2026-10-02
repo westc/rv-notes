@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "setup": "git config core.hooksPath scripts/hooks",
     "build": "npm run vendor && npm run icons && npm run css && npm run stamp",
     "vendor": "node scripts/vendor.js",
     "icons": "node scripts/icons.js",

@@ -348,6 +348,7 @@ files, which are committed so GitHub Pages can serve the repository as is.
 
 ```sh
 npm install
+npm run setup      # once per clone: keeps styles.css and sw.js up to date on commit
 npm test           # runs Code.gs and Loader.gs against fake Sheets in Node
 npm run serve      # the app plus a fake backend on http://localhost:8787
 npm run build      # vendor libraries, icons, Tailwind CSS, and sw.js
@@ -355,10 +356,11 @@ npm run build      # vendor libraries, icons, Tailwind CSS, and sw.js
 
 | Command | What it does |
 | --- | --- |
+| `npm run setup` | Turns on the pre-commit hook in `scripts/hooks/`. When a commit changes the app, the hook runs `npm run css` and `npm run stamp` and adds `styles.css` and `sw.js` to the commit. |
 | `npm run vendor` | Copies Vue, Leaflet, marked, DOMPurify, Bootstrap Icons, and jsQR from `node_modules` into `vendor/`. |
 | `npm run icons` | Draws the PNG icons in `icons/`. |
 | `npm run css` | Builds `styles.css` from `src/styles.css` with Tailwind. Run it after adding classes. |
-| `npm run stamp` | Lists the app's files in `sw.js` and sets its version. **Run it before every commit that changes the app**, or devices won't get the update. |
+| `npm run stamp` | Lists the app's files in `sw.js` and sets its version. Devices only notice an update when `sw.js` changes, so **every commit that changes the app needs this** (the hook does it for you). |
 
 `npm run serve` prints a connect link for a local test spreadsheet and a second one for
 trying more than one connection. `POST /__offline?on=1` makes the server drop every

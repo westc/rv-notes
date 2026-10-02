@@ -1,0 +1,21 @@
+#!/bin/sh
+# Rebuilds styles.css and restamps sw.js whenever a commit changes the app, so
+# installed copies of the app see the update. Turn it on with `npm run setup`.
+
+if ! git diff --cached --name-only | grep -qE '^(index\.html|manifest\.webmanifest|tailwind\.config\.js|src/|js/|vendor/|icons/)'; then
+  exit 0
+fi
+
+# Git apps opened from the Dock may not have nvm's node on the PATH.
+if ! command -v npm >/dev/null 2>&1 && [ -s "$HOME/.nvm/nvm.sh" ]; then
+  . "$HOME/.nvm/nvm.sh"
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "pre-commit: npm wasn't found, so styles.css and sw.js weren't updated." >&2
+  echo "Run npm run css && npm run stamp, then commit again." >&2
+  exit 1
+fi
+
+npm run --silent css >/dev/null 2>&1 || { echo "pre-commit: npm run css failed. Try npm install." >&2; exit 1; }
+npm run --silent stamp || exit 1
+git add styles.css sw.js
