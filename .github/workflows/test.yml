@@ -1,0 +1,31 @@
+# Runs the tests on every push and pull request, and checks that styles.css
+# and sw.js were rebuilt (the pre-commit hook does this; see npm run setup).
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: styles.css and sw.js are up to date
+        run: |
+          npm run css
+          npm run stamp
+          if ! git diff --quiet -- styles.css sw.js; then
+            git diff --stat -- styles.css sw.js
+            echo "::error::styles.css or sw.js is out of date. Run npm run css && npm run stamp and commit the result (or turn on the hook with npm run setup)."
+            exit 1
+          fi
